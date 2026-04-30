@@ -1,0 +1,21 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.DotSettings
+.idea/
+*.swp
+*.sln.docstates
+packages/
+TestResults/
+*.nupkg
+
+# Generated reports
+report*.json
+
+# Test artifacts
+*.xdelta
+
+# Archives
+*.zip

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Gmmt.Cli</RootNamespace>
+    <AssemblyName>gmmt</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gmmt.Core\Gmmt.Core.csproj" />
+    <ProjectReference Include="..\Gmmt.Diff\Gmmt.Diff.csproj" />
+    <ProjectReference Include="..\Gmmt.Patch\Gmmt.Patch.csproj" />
+    <ProjectReference Include="..\Gmmt.Pipeline\Gmmt.Pipeline.csproj" />
+    <ProjectReference Include="..\Gmmt.Report\Gmmt.Report.csproj" />
+    <ProjectReference Include="..\Gmmt.XDelta\Gmmt.XDelta.csproj" />
+    <ProjectReference Include="..\Gmmt.VanillaLibrary\Gmmt.VanillaLibrary.csproj" />
+  </ItemGroup>
+
+</Project>

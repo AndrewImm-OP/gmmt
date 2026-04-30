@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gmmt.Pipeline</RootNamespace>
+    <AssemblyName>Gmmt.Pipeline</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gmmt.Core\Gmmt.Core.csproj" />
+    <ProjectReference Include="..\Gmmt.Diff\Gmmt.Diff.csproj" />
+    <ProjectReference Include="..\Gmmt.Patch\Gmmt.Patch.csproj" />
+    <ProjectReference Include="..\Gmmt.Report\Gmmt.Report.csproj" />
+    <ProjectReference Include="..\Gmmt.XDelta\Gmmt.XDelta.csproj" />
+    <ProjectReference Include="..\Gmmt.VanillaLibrary\Gmmt.VanillaLibrary.csproj" />
+  </ItemGroup>
+
+</Project>

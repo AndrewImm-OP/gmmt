@@ -1,0 +1,329 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Gmmt.Desktop"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="760"
+        x:Class="Gmmt.Desktop.MainWindow"
+        x:DataType="local:MainWindowViewModel"
+        Title="GMMT"
+        Width="900" Height="760"
+        MinWidth="700" MinHeight="580"
+        Background="#1A1A2E">
+
+    <DockPanel>
+        <!-- ══════════ App Header ══════════ -->
+        <Border DockPanel.Dock="Top"
+                Background="#16213E"
+                Padding="20,14"
+                BorderBrush="#0F3460"
+                BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <!-- Logo area -->
+                    <Border Background="#5B8DEF" CornerRadius="6" Padding="8,4" VerticalAlignment="Center">
+                        <TextBlock Text="GMMT" FontWeight="Black" FontSize="14" Foreground="White"/>
+                    </Border>
+                    <StackPanel Spacing="0" VerticalAlignment="Center">
+                        <TextBlock Text="GameMaker Mod Translator" FontSize="14" FontWeight="SemiBold" Foreground="#DDEEFF"/>
+                        <TextBlock Text="xdelta translation pipeline" FontSize="10" Foreground="#667799"/>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ══════════ Tab Control ══════════ -->
+        <TabControl Margin="0" Padding="0">
+
+            <!-- ═══════════ Translate Tab ═══════════ -->
+            <TabItem Header="  Translate  " FontSize="13">
+                <ScrollViewer Padding="20,16">
+                    <StackPanel Spacing="16" MaxWidth="800">
+
+                        <!-- Error Banner -->
+                        <Border IsVisible="{Binding HasErrorMessage}"
+                                Background="#30E05252"
+                                BorderBrush="#55E05252"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="14,10"
+                                BoxShadow="0 2 12 0 #20E05252">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right"
+                                        Content="&#x2715;"
+                                        Command="{Binding DismissErrorCommand}"
+                                        Classes="ghost"
+                                        Margin="12,0,0,0"
+                                        FontSize="14"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <TextBlock Text="&#x26A0;" FontSize="16" Foreground="#FF7777" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding ErrorMessage}"
+                                               Foreground="#FFAAAA"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Center"
+                                               FontSize="12"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- ── Input Files Card ── -->
+                        <Border Classes="card">
+                            <StackPanel Spacing="14">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="&#x1F4C1;" FontSize="15" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Input Files" Classes="section-header" VerticalAlignment="Center" Margin="0"/>
+                                </StackPanel>
+
+                                <Separator Background="#12FFFFFF" Height="1" Margin="0,0,0,2"/>
+
+                                <!-- XDelta Patch File -->
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="XDelta Patch File *" Classes="field-label"/>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="&#x1F4C2; Browse"
+                                                Command="{Binding BrowseXDeltaCommand}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                Classes="browse"/>
+                                        <TextBox Text="{Binding XDeltaPath}"
+                                                 Watermark="Path to .xdelta / .vcdiff / .xd3 patch file"
+                                                 IsEnabled="{Binding !IsRunning}"
+                                                 CornerRadius="4,0,0,4"/>
+                                    </DockPanel>
+                                </StackPanel>
+
+                                <!-- Target Archive -->
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Target Archive (game.unx) *" Classes="field-label"/>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="&#x1F4C2; Browse"
+                                                Command="{Binding BrowseTargetCommand}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                Classes="browse"/>
+                                        <TextBox Text="{Binding TargetPath}"
+                                                 Watermark="Path to target Linux/Mac game archive"
+                                                 IsEnabled="{Binding !IsRunning}"
+                                                 CornerRadius="4,0,0,4"/>
+                                    </DockPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- ── Optional Settings Card ── -->
+                        <Border Classes="card">
+                            <StackPanel Spacing="14">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="&#x2699;" FontSize="15" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Optional Settings" Classes="section-header" VerticalAlignment="Center" Margin="0"/>
+                                </StackPanel>
+
+                                <Separator Background="#12FFFFFF" Height="1" Margin="0,0,0,2"/>
+
+                                <!-- Vanilla File -->
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Vanilla data.win" Classes="field-label"/>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="&#x1F4C2; Browse"
+                                                Command="{Binding BrowseVanillaCommand}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                Classes="browse"/>
+                                        <TextBox Text="{Binding VanillaPath}"
+                                                 Watermark="Auto-detect from vanilla library if empty"
+                                                 IsEnabled="{Binding !IsRunning}"
+                                                 CornerRadius="4,0,0,4"/>
+                                    </DockPanel>
+                                </StackPanel>
+
+                                <!-- Output Path -->
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Output Path" Classes="field-label"/>
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="&#x1F4BE; Save As"
+                                                Command="{Binding BrowseOutputCommand}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                Classes="browse"/>
+                                        <TextBox Text="{Binding OutputPath}"
+                                                 Watermark="Default: &lt;target&gt;.patched"
+                                                 IsEnabled="{Binding !IsRunning}"
+                                                 CornerRadius="4,0,0,4"/>
+                                    </DockPanel>
+                                </StackPanel>
+
+                                <!-- Checkboxes row -->
+                                <StackPanel Orientation="Horizontal" Spacing="28" Margin="0,4,0,0">
+                                    <CheckBox Content=" Dry Run (no output)" IsChecked="{Binding DryRun}"
+                                              IsEnabled="{Binding !IsRunning}" FontSize="12"/>
+                                    <CheckBox Content=" Create Backup (.bak)" IsChecked="{Binding Backup}"
+                                              IsEnabled="{Binding !IsRunning}" FontSize="12"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Validation hint -->
+                        <TextBlock Text="{Binding ValidationError}"
+                                   IsVisible="{Binding HasValidationError}"
+                                   Foreground="#E0A830"
+                                   FontSize="11"
+                                   Margin="4,-6,0,0"/>
+
+                        <!-- ── Action Row ── -->
+                        <DockPanel Margin="0,2,0,0">
+                            <ProgressBar DockPanel.Dock="Bottom"
+                                         IsIndeterminate="{Binding IsRunning}"
+                                         IsVisible="{Binding IsRunning}"
+                                         Height="3"
+                                         Margin="0,10,0,0"
+                                         Foreground="#5B8DEF"/>
+                            <Button Content="{Binding RunButtonText}"
+                                    Command="{Binding RunTranslateCommand}"
+                                    IsEnabled="{Binding CanRun}"
+                                    HorizontalAlignment="Right"
+                                    Classes="primary"
+                                    FontSize="14"/>
+                        </DockPanel>
+
+                        <!-- ── Result Summary Card ── -->
+                        <Border IsVisible="{Binding HasResult}"
+                                Classes="card"
+                                BoxShadow="0 2 12 0 #15000000">
+                            <StackPanel Spacing="12">
+                                <!-- Result header with status badge -->
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Left"
+                                            Classes="badge"
+                                            Background="{Binding ResultBadgeBackground}"
+                                            Margin="0,0,10,0">
+                                        <TextBlock Text="{Binding ResultBadgeText}"
+                                                   Foreground="{Binding ResultBadgeForeground}"
+                                                   FontSize="11" FontWeight="SemiBold"/>
+                                    </Border>
+                                    <TextBlock Text="Translation Result"
+                                               FontSize="14" FontWeight="Bold"
+                                               VerticalAlignment="Center"/>
+                                </DockPanel>
+
+                                <Separator Background="#12FFFFFF" Height="1"/>
+
+                                <!-- Stat counters row -->
+                                <Grid ColumnDefinitions="*,*,*,*" RowDefinitions="Auto" Margin="0,4">
+                                    <StackPanel Grid.Column="0" HorizontalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="{Binding AppliedCount}" Classes="stat-value" Foreground="#40C057" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Applied" Classes="stat-label" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="{Binding SkippedCount}" Classes="stat-value" Foreground="#E0A830" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Skipped" Classes="stat-label" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="{Binding ConflictCount}" Classes="stat-value" Foreground="#E07830" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Conflicts" Classes="stat-label" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3" HorizontalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="{Binding ErrorCount}" Classes="stat-value" Foreground="#E05252" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Errors" Classes="stat-label" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Output path if present -->
+                                <TextBlock Text="{Binding OutputPathDisplay}"
+                                           IsVisible="{Binding HasOutputPath}"
+                                           FontSize="11"
+                                           Foreground="#88FFFFFF"
+                                           Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- ── Log Panel ── -->
+                        <Border Classes="card" Padding="0">
+                            <DockPanel>
+                                <DockPanel DockPanel.Dock="Top" Margin="14,10,10,0">
+                                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <TextBlock Text="&#x1F4DD;" FontSize="13"/>
+                                        <TextBlock Text="Log Output" Classes="section-header" Margin="0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <Button Content="Clear" Command="{Binding ClearLogCommand}"
+                                            DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                            Classes="ghost" FontSize="11"/>
+                                </DockPanel>
+
+                                <TextBox Name="LogBox"
+                                         Text="{Binding LogText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         Classes="log-panel"
+                                         Height="180"
+                                         Margin="6,6,6,6"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                            </DockPanel>
+                        </Border>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══════════ Vanilla Library Tab ═══════════ -->
+            <TabItem Header="  Vanilla Library  " FontSize="13">
+                <DockPanel Margin="20,16">
+
+                    <!-- Top bar -->
+                    <Border DockPanel.Dock="Top" Classes="card" Margin="0,0,0,16">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Left" Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="&#x1F4DA;" FontSize="15" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Vanilla Archive Library"
+                                               FontWeight="Bold" FontSize="14"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding LibraryPath}"
+                                           Foreground="#667799" FontSize="11"
+                                           Margin="26,0,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel DockPanel.Dock="Right"
+                                        Orientation="Horizontal" Spacing="8"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center">
+                                <Button Content="&#x21BB; Refresh"
+                                        Command="{Binding RefreshLibraryCommand}"
+                                        Classes="ghost" FontSize="12"/>
+                                <Button Content="&#x2795; Add Archive"
+                                        Command="{Binding AddVanillaCommand}"
+                                        Classes="primary" Padding="14,7" FontSize="12"/>
+                                <Button Content="&#x1F5D1; Remove"
+                                        Command="{Binding RemoveVanillaCommand}"
+                                        IsEnabled="{Binding CanRemoveVanilla}"
+                                        Classes="danger" Padding="14,7" FontSize="12"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- DataGrid -->
+                    <Border Classes="card" Padding="0" ClipToBounds="True">
+                        <DataGrid ItemsSource="{Binding VanillaEntries}"
+                                  SelectedItem="{Binding SelectedVanillaEntry}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  GridLinesVisibility="Horizontal"
+                                  CanUserReorderColumns="False"
+                                  CanUserSortColumns="True"
+                                  SelectionMode="Single"
+                                  HeadersVisibility="Column"
+                                  Background="Transparent"
+                                  Margin="1">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Hash" Binding="{Binding ShortHash}" Width="100"/>
+                                <DataGridTextColumn Header="Game" Binding="{Binding GameName}" Width="*"/>
+                                <DataGridTextColumn Header="Version" Binding="{Binding VersionString}" Width="100"/>
+                                <DataGridTextColumn Header="Platform" Binding="{Binding Platform}" Width="80"/>
+                                <DataGridTextColumn Header="Size" Binding="{Binding FileSizeDisplay}" Width="90"/>
+                                <DataGridTextColumn Header="Added" Binding="{Binding AddedDisplay}" Width="100"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </DockPanel>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>

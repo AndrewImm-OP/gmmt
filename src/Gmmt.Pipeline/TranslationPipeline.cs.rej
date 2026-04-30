@@ -1,0 +1,13 @@
+--- TranslationPipeline.cs
++++ TranslationPipeline.cs
+@@ -751,9 +751,7 @@
+         // ─────────────────────────────────────────────────────────
+         ct.ThrowIfCancellationRequested();
+         _logger.Log("Patching object event bindings...");
+-        var eventPatchResults = new List<ObjectEventPatchResult>();
+-            ? ObjectEventPatcher.PatchAll(vanillaIdx, moddedIdx, target.Data)
+-            : new List<ObjectEventPatchResult>();
++        var eventPatchResults = ObjectEventPatcher.PatchAll(vanillaIdx, moddedIdx, target.Data);
+ 
+         if (eventPatchResults.Count > 0)
+         {

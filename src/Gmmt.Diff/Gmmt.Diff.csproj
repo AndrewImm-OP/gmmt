@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gmmt.Diff</RootNamespace>
+    <AssemblyName>Gmmt.Diff</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gmmt.Core\Gmmt.Core.csproj" />
+  </ItemGroup>
+
+</Project>
