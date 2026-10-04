@@ -28,7 +28,7 @@ The earlier diff/transplant and GMS2 → GMS1 experiment is preserved in [`old/t
 
 ## Downloads and requirements
 
-Download application packages from [GitHub Releases](https://github.com/AndrewImm-OP/gmmt/releases/latest). Version **0.2.2** targets **Linux x86_64 / amd64** and includes .NET; installing .NET separately is not required.
+Download application packages from [GitHub Releases](https://github.com/AndrewImm-OP/gmmt/releases/latest). Version **0.2.3** targets **Linux x86_64 / amd64** and includes .NET; installing .NET separately is not required.
 
 Standard OS libraries are still needed: glibc, libgcc/libstdc++, X11 or XWayland, OpenGL/Mesa, fontconfig/freetype, ICU, OpenSSL 3 and zlib. deb/rpm declare dependencies. AppImage and tar.zst rely on these libraries being present. These builds do not cover ARM or Alpine/musl.
 
@@ -36,26 +36,26 @@ Standard OS libraries are still needed: glibc, libgcc/libstdc++, X11 or XWayland
 
 | Format | Download | Use |
 | --- | --- | --- |
-| AppImage | [GMMT-0.2.2-x86_64.AppImage](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/GMMT-0.2.2-x86_64.AppImage) | Run without system installation |
-| deb | [gmmt_0.2.2_amd64.deb](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt_0.2.2_amd64.deb) | Debian/Ubuntu and compatible distributions |
-| rpm | [gmmt-0.2.2-1.x86_64.rpm](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt-0.2.2-1.x86_64.rpm) | Fedora and compatible RPM distributions |
-| tar.zst | [gmmt-0.2.2-linux-x86_64.tar.zst](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt-0.2.2-linux-x86_64.tar.zst) | Portable folder, including Arch/CachyOS |
+| AppImage | [GMMT-0.2.3-x86_64.AppImage](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/GMMT-0.2.3-x86_64.AppImage) | Run without system installation |
+| deb | [gmmt_0.2.3_amd64.deb](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt_0.2.3_amd64.deb) | Debian/Ubuntu and compatible distributions |
+| rpm | [gmmt-0.2.3-1.x86_64.rpm](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt-0.2.3-1.x86_64.rpm) | Fedora and compatible RPM distributions |
+| tar.zst | [gmmt-0.2.3-linux-x86_64.tar.zst](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt-0.2.3-linux-x86_64.tar.zst) | Portable folder, including Arch/CachyOS |
 
 ### AppImage
 
 ```sh
-chmod +x GMMT-0.2.2-x86_64.AppImage
-./GMMT-0.2.2-x86_64.AppImage
+chmod +x GMMT-0.2.3-x86_64.AppImage
+./GMMT-0.2.3-x86_64.AppImage
 
 # CLI from the same file
-./GMMT-0.2.2-x86_64.AppImage --cli --help
+./GMMT-0.2.3-x86_64.AppImage --cli --help
 ```
 
 If FUSE is unavailable, use extract-and-run:
 
 ```sh
-./GMMT-0.2.2-x86_64.AppImage --appimage-extract-and-run
-./GMMT-0.2.2-x86_64.AppImage --appimage-extract-and-run --cli --help
+./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run
+./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run --cli --help
 ```
 
 See the [official AppImage FUSE documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
@@ -63,7 +63,7 @@ See the [official AppImage FUSE documentation](https://docs.appimage.org/user-gu
 ### deb
 
 ```sh
-sudo apt install ./gmmt_0.2.2_amd64.deb
+sudo apt install ./gmmt_0.2.3_amd64.deb
 # Only needed for xdelta input:
 sudo apt install xdelta3
 
@@ -74,7 +74,7 @@ gmmt-cli --help
 ### rpm
 
 ```sh
-sudo dnf install ./gmmt-0.2.2-1.x86_64.rpm
+sudo dnf install ./gmmt-0.2.3-1.x86_64.rpm
 sudo dnf install xdelta3
 
 gmmt
@@ -86,7 +86,7 @@ Packages are currently unsigned. deb/rpm install the payload under `/opt/gmmt`, 
 ### Portable archive
 
 ```sh
-tar --zstd -xf gmmt-0.2.2-linux-x86_64.tar.zst
+tar --zstd -xf gmmt-0.2.3-linux-x86_64.tar.zst
 ./GMMT.AppDir/AppRun
 ./GMMT.AppDir/AppRun --cli --help
 ```
@@ -187,7 +187,7 @@ The default catalog is in the user's local data directory, normally `~/.local/sh
 
 ## CLI
 
-With deb/rpm, use `gmmt-cli`. For AppImage, use `./GMMT-0.2.2-x86_64.AppImage --cli`; for tar.zst, use `./GMMT.AppDir/AppRun --cli`. Examples use installed deb/rpm commands.
+With deb/rpm, use `gmmt-cli`. For AppImage, use `./GMMT-0.2.3-x86_64.AppImage --cli`; for tar.zst, use `./GMMT.AppDir/AppRun --cli`. Examples use installed deb/rpm commands.
 
 ```sh
 # Read-only discovery
@@ -310,11 +310,11 @@ dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll --help
 Install Python 3.11+, `dpkg-deb`, `rpmbuild`, `tar`, `zstd` and [appimagetool](https://github.com/AppImage/appimagetool) in addition to the SDK. The script publishes self-contained desktop/CLI applications for `linux-x64` and builds all four formats without root.
 
 ```sh
-python3 scripts/build-linux.py --version 0.2.2
+python3 scripts/build-linux.py --version 0.2.3
 
 # Custom appimagetool or an existing runtime for offline AppImage packaging:
 python3 scripts/build-linux.py \
-  --version 0.2.2 \
+  --version 0.2.3 \
   --appimagetool /path/to/appimagetool \
   --runtime-file /path/to/runtime-x86_64 \
   --output ./dist
@@ -327,7 +327,7 @@ Initial publication needs NuGet access and, without `--runtime-file`, an AppImag
 ```sh
 dotnet build tests/Gmmt.Runtime.Tests/Gmmt.Runtime.Tests.csproj -m:1
 dotnet run --project tests/Gmmt.Runtime.Tests --no-build
-python3 scripts/verify-linux.py --version 0.2.2
+python3 scripts/verify-linux.py --version 0.2.3
 ```
 
 Tests cover selection/mismatches, ambiguity, file mutations, extension acknowledgement, archive preservation, atomic failures, symlinks, reversible installation, backup integrity, interrupted restoration, discovery and localization/settings. Real game tests use isolated local copies and separate save overlays.

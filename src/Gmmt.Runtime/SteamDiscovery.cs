@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using System.Buffers.Binary;
+using System.IO.Compression;
 
 namespace Gmmt.Runtime;
 
@@ -7,11 +8,15 @@ public sealed record DiscoveredRunner(string Game, string RunnerPath, string Arc
 {
     public override string ToString() => $"{Game} · ELF{Elf.Bits} · {Path.GetFileName(ArchivePath)}";
 }
-public sealed record DiscoveredGame(string Name, string Directory)
+public sealed record DiscoveredGame(string Name, string Directory, string? AppId = null)
 {
     public override string ToString() => Name;
 }
-public sealed record SteamDiscoveryResult(string[] Libraries, DiscoveredGame[] Games, DiscoveredRunner[] Runners, string[] Warnings);
+public sealed record DiscoveredDepot(string AppId, string DepotId, string ArchivePath)
+{
+    public override string ToString() => $"App {AppId} · Depot {DepotId} · {Path.GetFileName(ArchivePath)}";
+}
+public sealed record SteamDiscoveryResult(string[] Libraries, DiscoveredGame[] Games, DiscoveredRunner[] Runners, string[] Warnings, DiscoveredDepot[] Depots);
 
 /// <summary>Read-only bounded discovery. Finding an ELF/archive pair does not certify compatibility.</summary>
 public static class SteamDiscovery
@@ -45,6 +50,32 @@ public static class SteamDiscovery
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(root + ": " + ex.Message); }
         }
+        var appIdsByInstallDir = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var library in libraries)
+        {
+            var steamapps = Path.Combine(library, "steamapps");
+            if (!Directory.Exists(steamapps)) continue;
+            try
+            {
+                foreach (var acf in Directory.EnumerateFiles(steamapps, "appmanifest_*.acf").Take(512))
+                {
+                    try
+                    {
+                        var text = File.ReadAllText(acf);
+                        var appidMatch = Regex.Match(text, "\"appid\"\\s*\"([0-9]+)\"");
+                        var installdirMatch = Regex.Match(text, "\"installdir\"\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+                        if (appidMatch.Success && installdirMatch.Success)
+                        {
+                            var appId = appidMatch.Groups[1].Value;
+                            var installdir = installdirMatch.Groups[1].Value.Replace("\\\\", "\\").Replace("\\\"", "\"");
+                            appIdsByInstallDir[installdir] = appId;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
         var runtime = libraries.SelectMany(l => new[] { Path.Combine(l, "steamapps/common/SteamLinuxRuntime/steam-runtime/run.sh"),
             Path.Combine(l, "steamapps/common/SteamLinuxRuntime_scout/steam-runtime/run.sh") }).FirstOrDefault(File.Exists);
         var games = new List<DiscoveredGame>();
@@ -68,7 +99,10 @@ public static class SteamDiscovery
                     runners.AddRange(found);
                     if (File.Exists(Path.Combine(game, "runner")) && File.Exists(Path.Combine(game, "assets/game.unx"))
                         && File.Exists(Path.Combine(game, "run.sh")) && found.Any(p => p.RunnerPath == Path.Combine(game, "runner")))
-                        games.Add(new(Path.GetFileName(entry), game));
+                    {
+                        appIdsByInstallDir.TryGetValue(title, out var appId);
+                        games.Add(new(title, game, appId));
+                    }
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(common + ": " + ex.Message); }
@@ -85,8 +119,91 @@ public static class SteamDiscovery
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(directory + ": " + ex.Message); }
         }
+        var zipRunnerCache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "gmmt", "runners", "cache");
+        foreach (var directory in extra)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try
+            {
+                if (!Directory.Exists(directory)) continue;
+                foreach (var zipPath in Directory.EnumerateFiles(directory, "*.zip").Take(32))
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var info = new FileInfo(zipPath);
+                        if (info.Length > 2L * 1024 * 1024 * 1024) continue;
+                        using var zip = ZipFile.OpenRead(zipPath);
+                        var runnerEntry = zip.Entries.FirstOrDefault(e => e.Name.Equals("runner", StringComparison.OrdinalIgnoreCase) && e.Length > 50_000);
+                        var archiveEntry = zip.Entries.FirstOrDefault(e => (e.Name.EndsWith(".unx", StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(".win", StringComparison.OrdinalIgnoreCase)) && e.Length > 50_000);
+                        if (runnerEntry != null && archiveEntry != null)
+                        {
+                            var cacheDir = Path.Combine(zipRunnerCache, Path.GetFileNameWithoutExtension(zipPath));
+                            Directory.CreateDirectory(cacheDir);
+                            var cachedRunner = Path.Combine(cacheDir, runnerEntry.Name);
+                            var cachedArchive = Path.Combine(cacheDir, archiveEntry.Name);
+                            if (!File.Exists(cachedRunner) || new FileInfo(cachedRunner).Length != runnerEntry.Length)
+                            {
+                                runnerEntry.ExtractToFile(cachedRunner, true);
+                                if (OperatingSystem.IsLinux())
+                                {
+                                    File.SetUnixFileMode(cachedRunner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                                }
+                            }
+                            if (!File.Exists(cachedArchive) || new FileInfo(cachedArchive).Length != archiveEntry.Length)
+                            {
+                                archiveEntry.ExtractToFile(cachedArchive, true);
+                            }
+                            if (visited.Add(cacheDir))
+                            {
+                                runners.AddRange(FindPairs(cacheDir, Path.GetFileNameWithoutExtension(zipPath), runtime, cancellation, warnings));
+                            }
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(directory + ": " + ex.Message); }
+        }
+        var depots = new List<DiscoveredDepot>();
+        var contentFolders = libraries.SelectMany(l => new[] {
+            Path.Combine(l, "steamapps/content"),
+            Path.Combine(l, "ubuntu12_32/steamapps/content")
+        }).Concat(roots.SelectMany(r => new[] {
+            Path.Combine(r, "steamapps/content"),
+            Path.Combine(r, "ubuntu12_32/steamapps/content")
+        })).Distinct().Where(Directory.Exists);
+
+        foreach (var contentFolder in contentFolders)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            try
+            {
+                foreach (var appDir in Directory.EnumerateDirectories(contentFolder, "app_*").Take(128))
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    var appId = Path.GetFileName(appDir).Replace("app_", "");
+                    foreach (var depotDir in Directory.EnumerateDirectories(appDir, "depot_*").Take(128))
+                    {
+                        cancellation.ThrowIfCancellationRequested();
+                        var depotId = Path.GetFileName(depotDir).Replace("depot_", "");
+                        foreach (var file in Directory.EnumerateFiles(depotDir, "*.*", SearchOption.AllDirectories).Take(64))
+                        {
+                            var fname = Path.GetFileName(file).ToLowerInvariant();
+                            if (fname is "data.win" or "game.win" or "game.unx")
+                            {
+                                depots.Add(new(appId, depotId, Path.GetFullPath(file)));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(contentFolder + ": " + ex.Message); }
+        }
+
         return new(libraries.Order().ToArray(), games.OrderBy(g => g.Name).ToArray(),
-            runners.DistinctBy(r => (r.RunnerPath, r.ArchivePath)).OrderBy(r => r.Game).ThenBy(r => r.ArchivePath).ToArray(), warnings.ToArray());
+            runners.DistinctBy(r => (r.RunnerPath, r.ArchivePath)).OrderBy(r => r.Game).ThenBy(r => r.ArchivePath).ToArray(), warnings.ToArray(),
+            depots.DistinctBy(d => d.ArchivePath).OrderBy(d => d.AppId).ThenBy(d => d.DepotId).ToArray());
     }
 
     private static List<DiscoveredRunner> FindPairs(string game, string name, string? runtime, CancellationToken cancellation, List<string> warnings)

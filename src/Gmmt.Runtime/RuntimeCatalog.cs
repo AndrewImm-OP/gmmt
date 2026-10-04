@@ -33,7 +33,12 @@ public sealed class RuntimeCatalog
 {
     public static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public string Path { get; }
-    public RuntimeCatalog(string path) => Path = System.IO.Path.GetFullPath(path);
+    public Func<string, ArchiveInspection> Inspector { get; init; } = ArchiveInspector.Inspect;
+    public RuntimeCatalog(string path, Func<string, ArchiveInspection>? inspector = null)
+    {
+        Path = System.IO.Path.GetFullPath(path);
+        if (inspector != null) Inspector = inspector;
+    }
     public List<RunnerProfile> Read() => File.Exists(Path)
         ? JsonSerializer.Deserialize<List<RunnerProfile>>(File.ReadAllText(Path))
             ?? throw new InvalidDataException("Empty runner catalog") : [];
@@ -66,7 +71,7 @@ public sealed class RuntimeCatalog
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Runner id is required");
         runner = System.IO.Path.GetFullPath(runner);
         var elf = InspectElf(runner);
-        var archive = ArchiveInspector.Inspect(reference);
+        var archive = Inspector(reference);
         if (archive.Metadata.IsYYC) throw new InvalidDataException("YYC archives are unsupported.");
         if (runtimeScript != null)
         {
@@ -89,7 +94,7 @@ public sealed class RuntimeCatalog
         return profile;
     }
 
-    public PackagePlan Plan(ArchiveInspection archive, string? runnerId = null)
+    public PackagePlan Plan(ArchiveInspection archive, string? runnerId = null, IEnumerable<DiscoveredRunner>? fallbackCandidates = null)
     {
         var blockers = new List<string>();
         var warnings = new List<string>();
@@ -109,6 +114,64 @@ public sealed class RuntimeCatalog
             var exact = matches.Where(p => p.ReferenceArchiveSha256 == archive.Sha256).ToList();
             if (exact.Count != 0) matches = exact;
         }
+
+        if (matches.Count == 0 && blockers.Count == 0 && fallbackCandidates != null && runnerId == null)
+        {
+            DiscoveredRunner? bestCandidate = null;
+            bool exactVersion = false;
+            foreach (var candidate in fallbackCandidates)
+            {
+                try
+                {
+                    if (!File.Exists(candidate.RunnerPath) || !File.Exists(candidate.ArchivePath)) continue;
+                    var candArchive = Inspector(candidate.ArchivePath);
+                    if (candArchive.Metadata.BytecodeVersion == archive.Metadata.BytecodeVersion &&
+                        candArchive.Metadata.IsGMS2 == archive.Metadata.IsGMS2)
+                    {
+                        if (candArchive.Metadata.VersionString == archive.Metadata.VersionString)
+                        {
+                            bestCandidate = candidate;
+                            exactVersion = true;
+                            break;
+                        }
+                        bestCandidate ??= candidate;
+                    }
+                }
+                catch { }
+            }
+
+            if (bestCandidate != null)
+            {
+                var sanitizedName = string.Concat(bestCandidate.Game.Select(c => char.IsLetterOrDigit(c) ? c : '-')).Trim('-').ToLowerInvariant();
+                if (string.IsNullOrWhiteSpace(sanitizedName)) sanitizedName = "candidate";
+                var autoId = $"auto-{sanitizedName}";
+                var existing = profiles.FirstOrDefault(p => p.Id == autoId);
+                if (existing == null)
+                {
+                    try
+                    {
+                        var autoProfile = Register(autoId, bestCandidate.RunnerPath, bestCandidate.ArchivePath, bestCandidate.SteamRuntimeScript);
+                        profiles.Add(autoProfile);
+                        matches.Add(autoProfile);
+                        warnings.Add($"Auto-registered matching runner '{autoId}' from {bestCandidate.RunnerPath}.");
+                        if (!exactVersion)
+                        {
+                            warnings.Add($"Runner matched by bytecode version (BC{archive.Metadata.BytecodeVersion}), but engine version differs.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        warnings.Add($"Failed to auto-register runner '{autoId}': {ex.Message}");
+                    }
+                }
+                else
+                {
+                    matches.Add(existing);
+                    warnings.Add($"Selected auto-registered runner '{autoId}'.");
+                }
+            }
+        }
+
         RunnerProfile? selected = matches.Count == 1 ? matches[0] : null;
         if (matches.Count == 0 && blockers.Count == 0) blockers.Add("No matching local Linux runner. Register a runner together with its known-compatible reference archive.");
         if (matches.Count > 1) blockers.Add("Multiple matching runners. Select one explicitly with --runner-id.");

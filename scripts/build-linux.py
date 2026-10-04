@@ -31,7 +31,7 @@ def copy_tree(source, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.2.2')
+    parser.add_argument('--version', default='0.2.3')
     parser.add_argument('--output', type=Path, default=ROOT / 'dist')
     parser.add_argument('--appimagetool', default=os.environ.get('APPIMAGETOOL', 'appimagetool'))
     parser.add_argument('--runtime-file', type=Path, help='Offline AppImage runtime; otherwise appimagetool downloads it')
@@ -44,11 +44,11 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    env.setdefault('DOTNET_CLI_HOME', str(ROOT / 'experiments/build/dotnet-home'))
     env['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
     # /tmp supports executable permissions and symlinks even when checkout is exFAT.
     with tempfile.TemporaryDirectory(prefix='gmmt-build-') as temp:
         work = Path(temp)
+        env['DOTNET_CLI_HOME'] = str(work / 'dotnet-home')
         env["NUGET_HTTP_CACHE_PATH"] = str(work / "nuget-http-cache")
         appdir = work / 'GMMT.AppDir'
         payload = appdir / 'usr/lib/gmmt'

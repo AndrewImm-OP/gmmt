@@ -25,7 +25,7 @@ try
     };
     var inspection = new ArchiveInspection(metadata, RuntimeCatalog.Hash(data), []);
     var profile = new RunnerProfile("test", runner, RuntimeCatalog.Hash(runner), new(32, 3), "1.0.0.1539", 16, inspection.Sha256, null);
-    var catalog = new RuntimeCatalog(Path.Combine(root, "catalog.json"));
+    var catalog = new RuntimeCatalog(Path.Combine(root, "catalog.json"), _ => inspection);
     void Set(params RunnerProfile[] profiles) => File.WriteAllText(catalog.Path, JsonSerializer.Serialize(profiles));
     Set(profile);
     var plan = catalog.Plan(inspection);
@@ -43,6 +43,11 @@ try
     Check(!catalog.Plan(inspection).CanPackage, "Changed runner accepted"); File.WriteAllBytes(runner, elf);
     Set(profile with { SteamRuntimeScript = Path.Combine(root, "missing") });
     Check(!catalog.Plan(inspection).CanPackage, "Missing runtime script accepted"); Set(profile);
+    var fallbackCand = new DiscoveredRunner("Fallback Game", runner, data, new(32, 3), null);
+    var emptyCatalog = new RuntimeCatalog(Path.Combine(root, "empty-catalog.json"), _ => inspection);
+    var autoPlan = emptyCatalog.Plan(inspection, fallbackCandidates: [fallbackCand]);
+    Check(autoPlan.CanPackage && autoPlan.Runner?.Id == "auto-fallback-game", "Fallback runner candidate not auto-registered or selected");
+    Check(emptyCatalog.Read().Any(p => p.Id == "auto-fallback-game"), "Auto-registered profile not persisted in catalog");
     var assets = Path.Combine(root, "resources"); Directory.CreateDirectory(assets);
     File.WriteAllText(Path.Combine(assets, "game.unx"), "must not override archive");
     File.WriteAllText(Path.Combine(assets, "music.ogg"), "resource");
@@ -143,6 +148,11 @@ try
         Check(SteamDiscovery.Scan([steamRoot], []).Games.Length == 1, "Legacy library layout missed");
         File.Delete(Path.Combine(nativeGame, "runner")); File.WriteAllBytes(Path.Combine(nativeGame, "runner"), [77, 90, 0, 0]);
         Check(SteamDiscovery.Scan([steamRoot], []).Runners.Length == 0, "Windows executable detected as native runner");
+        var depotDir = Path.Combine(steamRoot, "ubuntu12_32/steamapps/content/app_391540/depot_391541");
+        Directory.CreateDirectory(depotDir);
+        File.WriteAllText(Path.Combine(depotDir, "data.win"), "depot data");
+        var discoveredDepots = SteamDiscovery.Scan([steamRoot], []).Depots;
+        Check(discoveredDepots.Any(d => d.AppId == "391540" && d.DepotId == "391541" && d.ArchivePath == Path.Combine(depotDir, "data.win")), "Steam content depot missed");
     }
     File.WriteAllText(data, "changed");
     var failedOutput = Path.Combine(root, "failed-package");

@@ -15,6 +15,7 @@ public sealed class MainWindow : Window
     private bool changingLanguage;
     private Func<string>? renderLog;
     private Func<string>? renderStatus;
+    private SteamDiscoveryResult? lastDiscovery;
     private readonly TextBox catalog = new() { Name = "RunnerCatalog" };
     private readonly TextBox input = new() { Name = "ModArchive" };
     private readonly TextBox vanilla = new();
@@ -85,6 +86,9 @@ public sealed class MainWindow : Window
         separate.IsCheckedChanged += (_, _) => { packageOutput.IsVisible = separate.IsChecked == true; installation.IsVisible = separate.IsChecked != true; };
         var advanced = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 8) };
         advanced.Children.Add(Field("vanilla.label", vanilla));
+        var depotBtn = Action("steam.downloadDepot", DownloadDepotPrompt);
+        depotBtn.Margin = new Thickness(0, 0, 0, 4);
+        advanced.Children.Add(depotBtn);
         advanced.Children.Add(Field("libraries.label", libraries, true));
         advanced.Children.Add(Field("runner.label", runnerId, noBrowse: true));
         reviewed.Content = Label("extensions.review");
@@ -107,7 +111,14 @@ public sealed class MainWindow : Window
         donors.Children.Add(Heading("runners.heading", "runners.description"));
         donors.Children.Add(discoveredRunners);
         donors.Children.Add(Disclosure("search.extra", Field("search.label", extraRunnerRoots, true)));
-        donors.Children.Add(Action("runners.search", Discover));
+        var runnerSearchActions = new WrapPanel { Orientation = Orientation.Horizontal };
+        var searchRunnersBtn = Action("runners.search", Discover);
+        searchRunnersBtn.Margin = new Thickness(0, 0, 12, 8);
+        runnerSearchActions.Children.Add(searchRunnersBtn);
+        var deltaruneBtn = Action("steam.installDeltarune", InstallDeltarune);
+        deltaruneBtn.Margin = new Thickness(0, 0, 0, 8);
+        runnerSearchActions.Children.Add(deltaruneBtn);
+        donors.Children.Add(runnerSearchActions);
         donors.Children.Add(Note("runners.notice"));
         discoveredRunners.SelectionChanged += (_, _) =>
         {
@@ -285,16 +296,68 @@ public sealed class MainWindow : Window
     {
         var extra = Lines(extraRunnerRoots);
         var found = await Task.Run(() => SteamDiscovery.Scan(runnerRoots: extra.Length == 0 ? null : extra));
+        lastDiscovery = found;
         discoveredGames.ItemsSource = found.Games;
         discoveredRunners.ItemsSource = found.Runners;
         var game = found.Games.FirstOrDefault(g => g.Directory == Value(steamDirectory))
             ?? found.Games.FirstOrDefault(g => g.Name.Equals("Undertale", StringComparison.OrdinalIgnoreCase)) ?? found.Games.FirstOrDefault();
         if (game != null && (Value(steamDirectory).Length == 0 || found.Games.Any(g => g.Directory == Value(steamDirectory)))) discoveredGames.SelectedItem = game;
         if (Value(donorRunner).Length == 0 && found.Runners.Length != 0) discoveredRunners.SelectedIndex = 0;
+        if (string.IsNullOrWhiteSpace(Value(vanilla)) && found.Depots.Length != 0)
+        {
+            var matchingDepot = (discoveredGames.SelectedItem is DiscoveredGame dg && dg.AppId != null
+                ? found.Depots.FirstOrDefault(d => d.AppId == dg.AppId)
+                : null) ?? found.Depots.FirstOrDefault();
+            if (matchingDepot != null) vanilla.Text = matchingDepot.ArchivePath;
+        }
         if (!tabs.IsEnabled) return;
         SetLog(() => F("discovery.summary", found.Libraries.Length, found.Games.Length, found.Runners.Length)
             + T("discovery.instructions")
             + (found.Warnings.Length == 0 ? "" : "\n" + string.Join("\n", found.Warnings)));
+    }
+    private static void OpenSteamUri(string uri)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                Arguments = uri,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+        }
+        catch
+        {
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "steam",
+                    Arguments = uri,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+            }
+            catch { }
+        }
+    }
+    private async Task DownloadDepotPrompt()
+    {
+        var appId = (discoveredGames.SelectedItem is DiscoveredGame dg && dg.AppId != null) ? dg.AppId : "391540";
+        var depotId = appId == "391540" ? "391541" : (appId + "1");
+        OpenSteamUri("steam://open/console");
+        if (Clipboard != null)
+        {
+            try { await Clipboard.SetTextAsync($"download_depot {appId} {depotId}"); } catch { }
+        }
+        SetLog(() => F("steam.depotInstructions", appId, depotId));
+    }
+    private Task InstallDeltarune()
+    {
+        OpenSteamUri("steam://install/1671210");
+        SetLog(() => T("steam.deltaruneStarted"));
+        return Task.CompletedTask;
     }
     private async Task RestoreSteam()
     {
@@ -308,10 +371,22 @@ public sealed class MainWindow : Window
         var mod = Value(input); var baseline = Value(vanilla); var id = Value(runnerId); var destination = Value(output);
         var resourcePaths = Lines(assets); var libraryPaths = Lines(libraries); var acknowledged = reviewed.IsChecked == true;
         var standalone = separate.IsChecked == true; var game = Value(steamDirectory);
+        if (string.IsNullOrWhiteSpace(baseline) && mod.EndsWith(".xdelta", StringComparison.OrdinalIgnoreCase) && lastDiscovery?.Depots.Length > 0)
+        {
+            var matchingDepot = (discoveredGames.SelectedItem is DiscoveredGame dg && dg.AppId != null
+                ? lastDiscovery.Depots.FirstOrDefault(d => d.AppId == dg.AppId)
+                : null) ?? lastDiscovery.Depots.FirstOrDefault();
+            if (matchingDepot != null)
+            {
+                baseline = matchingDepot.ArchivePath;
+                vanilla.Text = baseline;
+            }
+        }
+        var fallbackRunners = lastDiscovery?.Runners;
         var result = await Task.Run(async () =>
         {
             using var prepared = await ArchiveInput.PrepareAsync(mod, baseline, mod.EndsWith(".xdelta", StringComparison.OrdinalIgnoreCase));
-            var plan = database.Plan(ArchiveInspector.Inspect(prepared.Path), id.Length == 0 ? null : id);
+            var plan = database.Plan(ArchiveInspector.Inspect(prepared.Path), id.Length == 0 ? null : id, fallbackRunners);
             string? built = null, backup = null;
             if (create)
             {

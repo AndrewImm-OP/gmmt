@@ -74,5 +74,9 @@
   "steam.restored": "Восстановлены файлы игры до установки мода: {0}",
   "build.summary": "{0}: GMS {1}, BC{2}\nRunner: {3}\n",
   "build.complete": "\n\nСобрано: {0}\nЗапуск: bash launch.sh. Прохождение ещё не проверено.",
-  "steam.complete": "\n\nМод установлен: {0}\nРезервная копия: {1}\nЗапускайте нативную Linux-версию игры через Steam. Прохождение ещё не проверено."
+  "steam.complete": "\n\nМод установлен: {0}\nРезервная копия: {1}\nЗапускайте нативную Linux-версию игры через Steam. Прохождение ещё не проверено.",
+  "steam.downloadDepot": "Скачать Windows-депот через Steam",
+  "steam.installDeltarune": "Установить Deltarune (GMS2)",
+  "steam.depotInstructions": "Открыта консоль Steam. Выполните команду:\ndownload_depot {0} {1}\nПосле загрузки нажмите «Повторить поиск» — GMMT подставит data.win автоматически.",
+  "steam.deltaruneStarted": "Запущена установка Deltarune в Steam (steam://install/1671210). После установки нажмите «Повторить поиск раннеров»."
 }
