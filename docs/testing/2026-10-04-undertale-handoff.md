@@ -57,13 +57,13 @@ Read this document and raw logs first. Check Latest results / Open issues below.
 - Official Linux UTRY 2.1.4 reaches interactive Flowey encounter (mod-interactive-04.png).
 - Windows and Linux patch reconstructions are byte-identical. Separate Windows-data case renders title and name-entry screens and accepts keys; full gameplay in that case not yet verified.
 - GMMT CLI builds; classifier runs. No GMS2→GMS1 code changes made.
-- Private GitHub repository created; source upload remains pending.
+- Source snapshot 461392d is uploaded to private GitHub repository; later controlled-runtime updates recorded below.
 
 ## Open issues
 - Continue Windows-data + Linux-runner control beyond name-entry screen.
 - Obtain and test a different Windows-only mod; UTRY alone cannot establish generality.
 - Complete broader gameplay checks; initial encounter is not full-game validation.
-- Review source payload and publish reproducible development snapshot to private GitHub.
+- Verify setup from a fresh clone; local CLI build and dependency patch checks passed.
 - Determine donor runtime compatibility limits and eventual distribution permissions.
 
 ### Official Linux package discovery (major result)
@@ -116,7 +116,7 @@ python scripts/testing/run_native_probe.py experiments/2026-10-04/runs/official-
 python scripts/testing/run_native_probe.py experiments/2026-10-04/runs/windows-data-linux-runner --scout-selected --seconds 180
 ```
 
-CAUTION: the probe currently overwrites case-name log/launch/result files on rerun. Preserve previous logs or add unique attempt paths before rerunning. Screenshots are uniquely named. All experiment files are excluded from GitHub; no game archives, runners, media, saves, or downloaded patches should be committed.
+Historical caution: initial probe overwrote case-name logs. The current probe uses unique UTC attempt names; older results retain their original names. Screenshots are uniquely named. All experiment files are excluded from GitHub; no game archives, runners, media, saves, or downloaded patches should be committed.
 
 ## Technical conclusion at this checkpoint
 UTRY supplies a real compatible native GMS2 runner and identical Windows/Linux game data. Therefore Windows-origin GameMaker data executing under Linux is technically demonstrated for this specific archive at startup/input level. This does not establish GMS2→GMS1 lowering, runtime universality, portability of Windows DLL extensions or distribution rights for a donor runner. Existing GMMT transplantation remains insufficient for general engine downgrade. Further work should measure runner matching and extension requirements with additional mods before committing to a universal converter design.
@@ -132,3 +132,32 @@ Classifier executed on Together patch with original Windows baseline and native 
 
 ### Reproducible source snapshot preparation
 Added .gitmodules for existing pinned UndertaleModTool gitlink; captured only real .csproj framework edits as patches, excluding exFAT-induced executable-bit noise. Nested Underanalyzer revision remains 94cc220ee9f738d6a79d1a46563ab1caa54ad243. setup.sh now checks .NET10, initializes dependencies, applies framework patches with forward/reverse checks, builds CLI sequentially. Added README with truthful limitations and no invented source license. Native probe now names logs with unique UTC attempt timestamps to preserve retries. Static shell/Python checks passed; reverse patch checks match existing dependency edits. Reviewed 77 candidate files (578011 bytes at initial review) plus original Git history: no archive FORM blobs, >2MB payloads or credential-pattern matches. Existing game/media/binary experiments remain ignored.
+
+### Controlled GMS2 archive vs GMS1 runner (critical negative control)
+First minimal case utry-windows-gms1-runner omitted external media and exited139 (attempt 20261004T060347791657Z). That result alone was confounded by incomplete media; do not use it as the decisive comparison.
+
+Added --runner read-only bind override and --config-dir to native probe. Repeated using FULL existing windows-data-linux-runner case (the same Windows archive, official supporting assets and scout-selected library paths that had rendered title/name input). Only runner changed to native-baseline/runner; private config was fresh windows-data-gms1-control-config. Command:
+
+```sh
+python scripts/testing/run_native_probe.py experiments/2026-10-04/runs/windows-data-linux-runner --runner experiments/2026-10-04/runs/native-baseline/runner --config-dir experiments/2026-10-04/runs/windows-data-gms1-control-config --scout-selected --seconds 20
+```
+
+Attempt 20261004T060438996765Z, start1791093879.1478968, end1791093881.974122, exit139, timed_out=false, empty stderr/stdout log. This is a runtime crash consistent with incompatibility; exact crash location remains unknown and requires debugger work. It does NOT identify a specific missing variable/function and does not prove that a full semantic converter is impossible. Positive controls: same GMS1 runner renders original Undertale and Windows Together archive under the selected libraries; same UTRY archive renders/accepts keys under official GMS2 runner.
+
+## Current evidence matrix
+
+| Data | Native runner | Verified outcome |
+| --- | --- | --- |
+| Original Linux Undertale 1.08 | Original GMS1 | Intro rendered |
+| Windows Together patch output | Original GMS1 | Mod-specific First human name UI; user reports working |
+| Windows UTRY patch output | Official UTRY GMS2 | Title/name entry and input verified |
+| Official Linux UTRY patch output (identical data) | Official UTRY GMS2 | Interactive Flowey encounter |
+| Same full Windows UTRY case | Original GMS1 | Crash139 before gameplay |
+
+Together successful launch was intentionally ended by harness after240seconds, exit-15, not a spontaneous crash. Classifier labels it MostlyPortable and estimates100%; that percentage is a heuristic, NOT measured whole-game success. Scope:287new code entries,605modified,246sprites,57objects,90scripts,2rooms.
+
+### GitHub publication and authorization
+Automatic review rejected first source push, stating that repository creation did not explicitly authorize source/journal payload upload. Requested precise authorization for commit461392d, destination private https://github.com/AndrewImm-OP/gmmt, excluding games/mods/saves/binaries. User replied `Да, отправляй`. Push succeeded; GitHub readback confirmed isPrivate=true, default branch master. Existing local executable-bit differences and untracked historical debugging scripts remain untouched. Initial snapshot includes original development changes as a checkpoint, not as new agent-authored conversion functionality.
+
+## Recommended next development step
+Implement a runtime compatibility/packaging plan as a distinct strategy: exact archive metadata, selected locally supplied runner, extension dependencies, external assets, source hashes, and evidence level. Keep GMS2-to-GMS1 lowering labeled experimental/unsupported until meaningful semantic translation tests pass. Do not automatically label a mod Windows-only based on one package, and do not select a mod solely because it lacks a Linux download: first establish its engine generation and dependency demands. A third case using GMS2 data without an existing ready native package is still required to test generality. Runner redistribution is not assumed authorized; consume a user-provided compatible runner in the initial design.

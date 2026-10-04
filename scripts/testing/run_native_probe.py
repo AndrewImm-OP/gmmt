@@ -9,11 +9,13 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("case", type=Path)
 parser.add_argument("--seconds", type=int, default=45)
+parser.add_argument("--runner", type=Path, help="Read-only runner override for a controlled runtime comparison")
+parser.add_argument("--config-dir", type=Path, help="Separate private config directory for this comparison")
 parser.add_argument("--scout-libs", action="store_true")
 parser.add_argument("--scout-selected", action="store_true")
 args = parser.parse_args()
 case = args.case.resolve()
-config = case.parent / (case.name + "-config")
+config = args.config_dir.resolve() if args.config_dir else case.parent / (case.name + "-config")
 config.mkdir(exist_ok=True)
 logdir = case.parent.parent / "logs"
 logdir.mkdir(exist_ok=True)
@@ -24,6 +26,11 @@ command = ["bwrap", "--die-with-parent", "--ro-bind", "/", "/",
            "--dev-bind", "/dev", "/dev", "--bind", str(case), str(case),
            "--bind", str(config), str(private_config_target),
            "--chdir", str(case)]
+if args.runner:
+    runner = args.runner.resolve(strict=True)
+    if not runner.is_file():
+        parser.error("--runner must be a file")
+    command += ["--ro-bind", str(runner), str(case / "runner")]
 libpaths = [str(case / "lib")]
 if args.scout_libs:
     scout = Path.home()/".local/share/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime"
@@ -34,6 +41,7 @@ if args.scout_selected:
     libpaths += selected.split(":")
 command += ["--setenv", "LD_LIBRARY_PATH", ":".join(libpaths), "./runner"]
 result = {"case":str(case),"command":command,"seconds":args.seconds,
+          "runner_override":str(args.runner.resolve()) if args.runner else None,
           "save_overlay":str(config),"attempt":attempt,"log_prefix":str(logdir/logprefix),"start_unix":time.time()}
 with (logdir/(logprefix+"-runner.log")).open("w") as log:
     process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
