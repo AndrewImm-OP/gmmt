@@ -153,6 +153,35 @@ try
         File.CreateSymbolicLink(Path.Combine(assets, "outside.ogg"), pe);
         Reject(() => PackageBuilder.Create(plan, Path.Combine(root, "linked-package"), [assets]), "Symlinked assets accepted");
     }
-    Console.WriteLine($"PASS: {passed} runtime selection and packaging checks");
+    var settingsPath = Path.Combine(root, "preferences/settings.json");
+    var localization = new Gmmt.Desktop.LocalizationService(settingsPath, () => "ru-RU");
+    Check(localization.Preference == "system" && localization.Language == "ru", "System Russian was not detected");
+    Check(Gmmt.Desktop.LocalizationService.Resolve("system", "de-DE") == "en", "Unsupported system language did not fall back to English");
+    Check(Gmmt.Desktop.LocalizationService.Resolve("system", "ru_RU.UTF-8") == "ru", "Linux locale was not recognized");
+    Check(Gmmt.Desktop.LocalizationService.Resolve("system", "rubbish") == "en", "Invalid locale incorrectly selected Russian");
+    localization.SetPreference("en");
+    Check(localization.Language == "en" && localization.Text("tab.runners") == "Runners", "Explicit English override failed");
+    Check(new Gmmt.Desktop.LocalizationService(settingsPath, () => "ru").Preference == "en", "Language did not survive reload");
+    localization.SetPreference("ru");
+    Check(localization.Format("discovery.summary", 2, 1, 3).Contains("Steam: 2"), "Russian formatted string failed");
+    localization.SetPreference("system");
+    Check(new Gmmt.Desktop.LocalizationService(settingsPath, () => "en-GB").Language == "en", "Saved system mode did not redetect language");
+    foreach (var key in Gmmt.Desktop.LocalizationService.Keys)
+    {
+        localization.SetPreference("en"); var english = localization.Text(key);
+        localization.SetPreference("ru"); var russian = localization.Text(key);
+        if (string.IsNullOrWhiteSpace(english) || string.IsNullOrWhiteSpace(russian)) throw new Exception("Empty localization entry: " + key);
+        var parameters = System.Text.RegularExpressions.Regex.Matches(english, "\\{[0-9]+\\}").Select(m => m.Value).Order();
+        if (!parameters.SequenceEqual(System.Text.RegularExpressions.Regex.Matches(russian, "\\{[0-9]+\\}").Select(m => m.Value).Order())) throw new Exception("Format placeholder mismatch: " + key);
+    }
+    Check(true, "Catalog translations and placeholders");
+    File.WriteAllText(settingsPath, "not json");
+    Check(new Gmmt.Desktop.LocalizationService(settingsPath, () => "ru").Preference == "system", "Malformed settings prevented system fallback");
+    var blockedSettings = Path.Combine(root, "settings-is-a-directory"); Directory.CreateDirectory(blockedSettings);
+    var blockedLocalization = new Gmmt.Desktop.LocalizationService(blockedSettings, () => "ru");
+    try { blockedLocalization.SetPreference("en"); throw new Exception("Settings overwrite directory unexpectedly succeeded"); }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Check(blockedLocalization.Preference == "system", "Failed write changed active preference"); }
+    Check(!Directory.EnumerateFiles(root, "*.tmp", SearchOption.AllDirectories).Any(), "Failed settings write leaked a temporary file");
+    Console.WriteLine($"PASS: {passed} runtime, packaging, discovery and localization checks");
 }
 finally { Directory.Delete(root, true); }

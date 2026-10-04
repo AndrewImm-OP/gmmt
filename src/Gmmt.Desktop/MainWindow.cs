@@ -9,41 +9,58 @@ namespace Gmmt.Desktop;
 
 public sealed class MainWindow : Window
 {
-    private readonly TextBox catalog = new();
-    private readonly TextBox input = new();
+    private readonly LocalizationService locale;
+    private readonly List<Action> translations = [];
+    private readonly ComboBox language = new() { Name = "LanguageSelector", MinWidth = 140, HorizontalAlignment = HorizontalAlignment.Right };
+    private bool changingLanguage;
+    private Func<string>? renderLog;
+    private Func<string>? renderStatus;
+    private readonly TextBox catalog = new() { Name = "RunnerCatalog" };
+    private readonly TextBox input = new() { Name = "ModArchive" };
     private readonly TextBox vanilla = new();
-    private readonly TextBox assets = new() { AcceptsReturn = true, MinHeight = 64, Watermark = "По одной папке на строку. Сначала оригинальные ресурсы, затем ресурсы мода." };
-    private readonly TextBox libraries = new() { Watermark = "Папки Linux-библиотек, по одной на строку", AcceptsReturn = true };
+    private readonly TextBox assets = new() { AcceptsReturn = true, MinHeight = 64 };
+    private readonly TextBox libraries = new() { AcceptsReturn = true };
     private readonly TextBox output = new();
     private readonly TextBox steamDirectory = new();
-    private readonly ComboBox discoveredGames = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Игры найдутся автоматически; папку можно выбрать вручную" };
-    private readonly TextBox extraRunnerRoots = new() { AcceptsReturn = true, Watermark = "Необязательно: распакованные Linux-игры или моды, по папке на строку" };
-    private readonly ComboBox discoveredRunners = new() { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Поиск локальных Linux-раннеров в библиотеках Steam…" };
-    private readonly CheckBox separate = new() { Content = "Собирать в отдельную папку", IsChecked = true };
-    private readonly TextBox runnerId = new() { Watermark = "Пусто — автоматический подбор" };
+    private readonly ComboBox discoveredGames = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly TextBox extraRunnerRoots = new() { AcceptsReturn = true };
+    private readonly ComboBox discoveredRunners = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly CheckBox separate = new() { Name = "SeparateOutput", IsChecked = true };
+    private readonly TextBox runnerId = new();
     private readonly TextBox donorId = new();
     private readonly TextBox donorRunner = new();
     private readonly TextBox reference = new();
-    private readonly TextBox runtime = new() { Watermark = "Необязательно: Steam scout steam-runtime/run.sh" };
-    private readonly CheckBox reviewed = new() { Content = "Нативные расширения проверены, Linux-зависимости подготовлены" };
-    private readonly TextBox log = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 160 };
-    private readonly TabControl tabs = new();
-    private readonly TextBlock status = new() { Text = "Готов к работе", FontWeight = FontWeight.SemiBold };
+    private readonly TextBox runtime = new();
+    private readonly CheckBox reviewed = new();
+    private readonly TextBox log = new() { Name = "OperationLog", IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 160 };
+    private readonly TabControl tabs = new() { Name = "WorkflowTabs" };
+    private readonly TextBlock status = new() { Name = "OperationStatus", FontWeight = FontWeight.SemiBold };
     private readonly ProgressBar progress = new() { IsIndeterminate = true, IsVisible = false, Height = 3 };
     private static readonly IBrush Muted = Brush.Parse("#B4B8C0");
     private static readonly IBrush Accent = Brush.Parse("#9DDFC5");
 
-    public MainWindow()
+    public MainWindow() : this(new LocalizationService()) { }
+    public MainWindow(LocalizationService locale, bool discoverOnOpen = true)
     {
-        Title = "GMMT · Моды для Linux";
+        this.locale = locale;
+        Bind(() => assets.Watermark = T("assets.placeholder"));
+        Bind(() => libraries.Watermark = T("libraries.placeholder"));
+        Bind(() => discoveredGames.PlaceholderText = T("games.placeholder"));
+        Bind(() => extraRunnerRoots.Watermark = T("search.placeholder"));
+        Bind(() => discoveredRunners.PlaceholderText = T("runners.placeholder"));
+        Bind(() => separate.Content = T("output.separate"));
+        Bind(() => runnerId.Watermark = T("runner.placeholder"));
+        Bind(() => runtime.Watermark = T("runtime.placeholder"));
+        SetStatus("status.ready");
+        Bind(() => Title = T("window.title"));
         Width = 980; Height = 860; MinWidth = 700; MinHeight = 640;
         Background = Brush.Parse("#191B20");
         catalog.Text = Environment.GetEnvironmentVariable("GMMT_CATALOG") ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "gmmt", "runners.json");
-        input.Watermark = "Выберите архив мода или .xdelta";
-        output.Watermark = "Новая папка для готовой игры";
-        donorId.Watermark = "Например, undertale-linux";
-        log.Text = "Добавьте локальный runner во вкладке «Раннеры». Затем выберите мод и папки ресурсов.";
+        Bind(() => input.Watermark = T("input.placeholder"));
+        Bind(() => output.Watermark = T("output.placeholder"));
+        Bind(() => donorId.Watermark = T("id.placeholder"));
+        SetLog(() => T("welcome"));
         log.Background = Brush.Parse("#202329");
         log.BorderThickness = new Thickness(0);
         log.Padding = new Thickness(14);
@@ -51,46 +68,47 @@ public sealed class MainWindow : Window
         log.FontSize = 13;
 
         var build = new StackPanel { Spacing = 16, Margin = new Thickness(0, 16, 0, 20) };
-        build.Children.Add(Heading("Подготовьте мод", "GMMT подбирает Linux-runner и подготавливает мод для запуска."));
-        build.Children.Add(Field("Архив мода или xdelta-патч", input));
-        build.Children.Add(Field("Папки ресурсов", assets, true));
+        build.Children.Add(Heading("build.heading", "build.description"));
+        build.Children.Add(Field("input.label", input));
+        build.Children.Add(Field("assets.label", assets, true));
         build.Children.Add(separate);
-        var packageOutput = Field("Папка результата", output, true, true);
+        var packageOutput = Field("output.label", output, true, true);
         build.Children.Add(packageOutput);
         var installation = new StackPanel { Spacing = 12, IsVisible = false };
         installation.Children.Add(discoveredGames);
-        installation.Children.Add(Field("Папка Linux-игры в Steam", steamDirectory, true));
-        installation.Children.Add(Action("Повторить поиск Steam", Discover));
+        installation.Children.Add(Field("steam.label", steamDirectory, true));
+        installation.Children.Add(Action("steam.search", Discover));
         discoveredGames.SelectionChanged += (_, _) => { if (discoveredGames.SelectedItem is DiscoveredGame found) steamDirectory.Text = found.Directory; };
-        installation.Children.Add(Note("Закройте игру перед установкой. Заменяемые файлы сохраняются в резервной копии. Steam запустит мод через штатный run.sh; режим Proton не поддерживается."));
-        installation.Children.Add(Action("Восстановить файлы до установки мода", RestoreSteam));
+        installation.Children.Add(Note("steam.notice"));
+        installation.Children.Add(Action("steam.restore", RestoreSteam));
         build.Children.Add(installation);
         separate.IsCheckedChanged += (_, _) => { packageOutput.IsVisible = separate.IsChecked == true; installation.IsVisible = separate.IsChecked != true; };
         var advanced = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 8) };
-        advanced.Children.Add(Field("Чистый Windows-архив · только для xdelta", vanilla));
-        advanced.Children.Add(Field("Linux-библиотеки · необязательно", libraries, true));
-        advanced.Children.Add(Field("ID runner · пусто для автоматического подбора", runnerId, noBrowse: true));
-        reviewed.Content = new TextBlock { Text = "Нативные расширения проверены, Linux-зависимости подготовлены", TextWrapping = TextWrapping.Wrap };
+        advanced.Children.Add(Field("vanilla.label", vanilla));
+        advanced.Children.Add(Field("libraries.label", libraries, true));
+        advanced.Children.Add(Field("runner.label", runnerId, noBrowse: true));
+        reviewed.Content = Label("extensions.review");
         advanced.Children.Add(reviewed);
-        build.Children.Add(new Expander { Header = "Дополнительные настройки и xdelta", Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch });
+        build.Children.Add(Disclosure("advanced", advanced));
         var actions = new WrapPanel { Orientation = Orientation.Horizontal };
-        var primary = Action("Собрать Linux-пакет", () => Build(true));
+        var primary = Action("build.action", () => Build(true));
         primary.Classes.Add("primary");
-        separate.IsCheckedChanged += (_, _) => primary.Content = separate.IsChecked == true ? "Собрать Linux-пакет" : "Установить мод в Steam";
+        Bind(() => primary.Content = T(separate.IsChecked == true ? "build.action" : "steam.install"));
+        separate.IsCheckedChanged += (_, _) => primary.Content = T(separate.IsChecked == true ? "build.action" : "steam.install");
         primary.Margin = new Thickness(0, 0, 12, 8);
         actions.Children.Add(primary);
-        var inspect = Action("Проверить совместимость", () => Build(false));
+        var inspect = Action("build.inspect", () => Build(false));
         inspect.Margin = new Thickness(0, 0, 0, 8);
         actions.Children.Add(inspect);
         build.Children.Add(actions);
-        build.Children.Add(Note("Архив игры сохраняется без изменений. Подбор по версии требует отдельной проверки запуска и прохождения."));
+        build.Children.Add(Note("build.notice"));
 
         var donors = new StackPanel { Spacing = 16, Margin = new Thickness(0, 16, 0, 20) };
-        donors.Children.Add(Heading("Каталог раннеров", "Добавьте Linux-runner и эталонный архив, который уже работает с ним."));
+        donors.Children.Add(Heading("runners.heading", "runners.description"));
         donors.Children.Add(discoveredRunners);
-        donors.Children.Add(new Expander { Header = "Дополнительные папки поиска", Content = Field("Папки с Linux-играми / модами", extraRunnerRoots, true), HorizontalAlignment = HorizontalAlignment.Stretch });
-        donors.Children.Add(Action("Повторить поиск раннеров", Discover));
-        donors.Children.Add(Note("Найденная пара ELF/архив — кандидат. Проверьте, что эталон работает с этим раннером, затем добавьте его в каталог."));
+        donors.Children.Add(Disclosure("search.extra", Field("search.label", extraRunnerRoots, true)));
+        donors.Children.Add(Action("runners.search", Discover));
+        donors.Children.Add(Note("runners.notice"));
         discoveredRunners.SelectionChanged += (_, _) =>
         {
             if (discoveredRunners.SelectedItem is not DiscoveredRunner found) return;
@@ -98,25 +116,32 @@ public sealed class MainWindow : Window
             var slug = System.Text.RegularExpressions.Regex.Replace(found.Game.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
             donorId.Text = (slug.Length == 0 ? "runner" : slug) + "-linux";
         };
-        donors.Children.Add(Field("Файл каталога", catalog));
-        donors.Children.Add(Field("Уникальный ID", donorId, noBrowse: true));
-        donors.Children.Add(Field("Linux-runner · ELF", donorRunner));
-        donors.Children.Add(Field("Эталонный игровой архив", reference));
-        donors.Children.Add(new Expander { Header = "Steam runtime · необязательно", Content = Field("Steam scout: steam-runtime/run.sh", runtime), HorizontalAlignment = HorizontalAlignment.Stretch });
+        donors.Children.Add(Field("catalog.label", catalog));
+        donors.Children.Add(Field("id.label", donorId, noBrowse: true));
+        donors.Children.Add(Field("elf.label", donorRunner));
+        donors.Children.Add(Field("reference.label", reference));
+        donors.Children.Add(Disclosure("runtime.optional", Field("runtime.label", runtime)));
         var donorActions = new WrapPanel();
-        var add = Action("Добавить runner", Register); add.Classes.Add("primary"); add.Margin = new Thickness(0, 0, 12, 8);
+        var add = Action("runners.add", Register); add.Classes.Add("primary"); add.Margin = new Thickness(0, 0, 12, 8);
         donorActions.Children.Add(add);
-        donorActions.Children.Add(Action("Показать каталог", ListRunners));
+        donorActions.Children.Add(Action("runners.list", ListRunners));
         donors.Children.Add(donorActions);
-        donors.Children.Add(Note("Раннеры берутся из ваших локальных игр. GMMT не скачивает и не распространяет движки."));
+        donors.Children.Add(Note("runners.local"));
         tabs.ItemsSource = new[] {
-            new TabItem { Header = "Сборка мода", Content = new ScrollViewer { Content = build } },
-            new TabItem { Header = "Раннеры", Content = new ScrollViewer { Content = donors } }
+            LocalizedTab("tab.build", new ScrollViewer { Content = build }),
+            LocalizedTab("tab.runners", new ScrollViewer { Content = donors })
         };
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 20) };
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 0, 0, 20) };
         header.Children.Add(new TextBlock { Text = "GMMT", FontSize = 30, FontWeight = FontWeight.Bold, Foreground = Accent });
-        var subtitle = new TextBlock { Text = "Моды GameMaker для Linux", Foreground = Muted, VerticalAlignment = VerticalAlignment.Center, FontSize = 13 };
+        var subtitle = Label("app.subtitle"); subtitle.Foreground = Muted; subtitle.VerticalAlignment = VerticalAlignment.Center; subtitle.FontSize = 13; subtitle.Margin = new Thickness(16, 0);
         Grid.SetColumn(subtitle, 1); header.Children.Add(subtitle);
+        var system = new ComboBoxItem { Tag = "system" };
+        Bind(() => system.Content = T("language.system"));
+        language.ItemsSource = new[] { system, new ComboBoxItem { Content = "English", Tag = "en" }, new ComboBoxItem { Content = "Русский", Tag = "ru" } };
+        language.SelectedIndex = locale.Preference switch { "en" => 1, "ru" => 2, _ => 0 };
+        Bind(() => AutomationProperties.SetName(language, T("language.label")));
+        language.SelectionChanged += (_, _) => ChangeLanguage();
+        Grid.SetColumn(language, 2); header.Children.Add(language);
         var result = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(0, 16, 0, 0) };
         status.Margin = new Thickness(0, 0, 0, 8);
         result.Children.Add(status);
@@ -127,33 +152,73 @@ public sealed class MainWindow : Window
         Grid.SetRow(tabs, 1); page.Children.Add(tabs);
         Grid.SetRow(result, 2); page.Children.Add(result);
         Content = page;
-        Opened += async (_, _) =>
+        if (discoverOnOpen) Opened += async (_, _) =>
         {
             try { await Discover(); }
-            catch (Exception ex) { log.Text = "Автопоиск недоступен: " + ex.Message + "\nВыберите файлы вручную."; }
+            catch (Exception ex) { SetLog(() => F("error.discovery", ex.Message)); }
         };
     }
 
-    private static Control Heading(string title, string description)
+    private string T(string key) => locale.Text(key);
+    private string F(string key, params object[] values) => locale.Format(key, values);
+    private void Bind(Action update) { translations.Add(update); update(); }
+    private void SetLog(Func<string> render) { renderLog = render; log.Text = render(); }
+    private void SetStatus(string key, params object[] values) { renderStatus = () => F(key, values); status.Text = renderStatus(); }
+    private TextBlock Label(string key, double size = 13, FontWeight? weight = null)
+    {
+        var block = new TextBlock { FontSize = size, FontWeight = weight ?? FontWeight.Normal, TextWrapping = TextWrapping.Wrap };
+        Bind(() => block.Text = T(key)); return block;
+    }
+    private Expander Disclosure(string key, Control content)
+    {
+        var expander = new Expander { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch };
+        Bind(() => expander.Header = T(key)); return expander;
+    }
+    private TabItem LocalizedTab(string key, Control content)
+    {
+        var tab = new TabItem { Content = content }; Bind(() => tab.Header = T(key)); return tab;
+    }
+    private void ChangeLanguage()
+    {
+        if (changingLanguage || language.SelectedItem is not ComboBoxItem item || item.Tag is not string preference) return;
+        var previous = locale.Preference;
+        try
+        {
+            locale.SetPreference(preference);
+            foreach (var update in translations) update();
+            if (renderLog != null) log.Text = renderLog();
+            if (renderStatus != null) status.Text = renderStatus();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            changingLanguage = true;
+            language.SelectedIndex = previous switch { "en" => 1, "ru" => 2, _ => 0 };
+            changingLanguage = false;
+            SetStatus("status.failed"); SetLog(() => F("error.settings", ex.Message));
+        }
+    }
+
+    private Control Heading(string title, string description)
     {
         var panel = new StackPanel { Spacing = 6 };
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 21, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(Label(title, 21, FontWeight.SemiBold));
         panel.Children.Add(Note(description));
         return panel;
     }
 
-    private static TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 820, Foreground = Muted, FontSize = 13, LineHeight = 20 };
+    private TextBlock Note(string key) { var block = Label(key); block.MaxWidth = 820; block.Foreground = Muted; block.FontSize = 13; block.LineHeight = 20; return block; }
     private Control Field(string label, TextBox box, bool folder = false, bool newFolder = false, bool noBrowse = false)
     {
         var field = new StackPanel { Spacing = 7 };
-        field.Children.Add(new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeight.Medium });
-        AutomationProperties.SetName(box, label);
+        field.Children.Add(Label(label, 13, FontWeight.Medium));
+        Bind(() => AutomationProperties.SetName(box, T(label)));
         box.MinHeight = 38;
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         row.Children.Add(box);
         if (!noBrowse)
         {
-            var button = new Button { Content = newFolder ? "Куда сохранить…" : "Обзор…", Margin = new Thickness(8, 0, 0, 0), MinHeight = 38 };
+            var button = new Button { Margin = new Thickness(8, 0, 0, 0), MinHeight = 38 };
+            Bind(() => button.Content = T(newFolder ? "browse.output" : "browse"));
             Grid.SetColumn(button, 1); row.Children.Add(button);
             button.Click += async (_, _) =>
             {
@@ -162,19 +227,19 @@ public sealed class MainWindow : Window
                     string? path;
                     if (folder)
                     {
-                        var chosen = await StorageProvider.OpenFolderPickerAsync(new() { Title = label, AllowMultiple = false });
+                        var chosen = await StorageProvider.OpenFolderPickerAsync(new() { Title = T(label), AllowMultiple = false });
                         path = chosen.Count == 1 ? chosen[0].Path.LocalPath : null;
                     }
                     else
                     {
-                        var chosen = await StorageProvider.OpenFilePickerAsync(new() { Title = label, AllowMultiple = false });
+                        var chosen = await StorageProvider.OpenFilePickerAsync(new() { Title = T(label), AllowMultiple = false });
                         path = chosen.Count == 1 ? chosen[0].Path.LocalPath : null;
                     }
                     if (path != null)
                         box.Text = newFolder ? Path.Combine(path, "gmmt-linux-package")
                             : box.AcceptsReturn ? string.Join("\n", Lines(box).Append(path)) : path;
                 }
-                catch (Exception ex) { status.Text = "Не удалось выбрать путь"; status.Foreground = Brush.Parse("#FFB4AB"); log.Text = ex.Message; }
+                catch (Exception ex) { SetStatus("status.pathError"); status.Foreground = Brush.Parse("#FFB4AB"); SetLog(() => ex.Message); }
             };
         }
         field.Children.Add(row); return field;
@@ -182,19 +247,21 @@ public sealed class MainWindow : Window
 
     private Button Action(string title, Func<Task> action)
     {
-        var button = new Button { Content = title, MinHeight = 40, Padding = new Thickness(18, 8) };
+        var button = new Button { MinHeight = 40, Padding = new Thickness(18, 8) };
+        Bind(() => button.Content = T(title));
         button.Click += async (_, _) =>
         {
+            language.IsEnabled = false;
             tabs.IsEnabled = false; catalog.IsEnabled = false; progress.IsVisible = true;
-            var currentTitle = button.Content?.ToString() ?? title;
-            status.Text = "Выполняется: " + currentTitle; status.Foreground = Muted; log.Text = "Подготавливаю файлы…";
+            var currentTitle = button.Content?.ToString() ?? T(title);
+            SetStatus("status.busy", currentTitle); status.Foreground = Muted; SetLog(() => T("busy.files"));
             try
             {
                 await action();
-                if (status.Text == "Выполняется: " + currentTitle) { status.Text = "Готово"; status.Foreground = Accent; }
+                if (status.Text == F("status.busy", currentTitle)) { SetStatus("status.done"); status.Foreground = Accent; }
             }
-            catch (Exception ex) { status.Text = "Не удалось выполнить действие"; status.Foreground = Brush.Parse("#FFB4AB"); log.Text = "Ошибка: " + ex.Message; }
-            finally { tabs.IsEnabled = true; catalog.IsEnabled = true; progress.IsVisible = false; }
+            catch (Exception ex) { SetStatus("status.failed"); status.Foreground = Brush.Parse("#FFB4AB"); SetLog(() => F("error.detail", ex.Data["GmmtLocalizationKey"] is string key ? T(key) : ex.Message)); }
+            finally { tabs.IsEnabled = true; catalog.IsEnabled = true; progress.IsVisible = false; language.IsEnabled = true; }
         };
         return button;
     }
@@ -204,7 +271,7 @@ public sealed class MainWindow : Window
     private Task ListRunners()
     {
         var profiles = new RuntimeCatalog(Value(catalog)).Read();
-        log.Text = profiles.Count == 0 ? "Каталог пуст." : string.Join("\n", profiles.Select(p => $"{p.Id}: GMS {p.EngineVersion}, BC{p.BytecodeVersion}, ELF{p.Elf.Bits}\n{p.RunnerPath}"));
+        SetLog(() => profiles.Count == 0 ? T("catalog.empty") : string.Join("\n", profiles.Select(p => $"{p.Id}: GMS {p.EngineVersion}, BC{p.BytecodeVersion}, ELF{p.Elf.Bits}\n{p.RunnerPath}")));
         return Task.CompletedTask;
     }
     private async Task Register()
@@ -212,7 +279,7 @@ public sealed class MainWindow : Window
         var database = new RuntimeCatalog(Value(catalog));
         var id = Value(donorId); var runner = Value(donorRunner); var archive = Value(reference); var script = Value(runtime);
         var profile = await Task.Run(() => database.Register(id, runner, archive, script.Length == 0 ? null : script));
-        log.Text = $"Добавлен {profile.Id}: GMS {profile.EngineVersion}, BC{profile.BytecodeVersion}, ELF{profile.Elf.Bits}.";
+        SetLog(() => F("runner.registered", profile.Id, profile.EngineVersion, profile.BytecodeVersion, profile.Elf.Bits));
     }
     private async Task Discover()
     {
@@ -225,15 +292,15 @@ public sealed class MainWindow : Window
         if (game != null && (Value(steamDirectory).Length == 0 || found.Games.Any(g => g.Directory == Value(steamDirectory)))) discoveredGames.SelectedItem = game;
         if (Value(donorRunner).Length == 0 && found.Runners.Length != 0) discoveredRunners.SelectedIndex = 0;
         if (!tabs.IsEnabled) return;
-        log.Text = $"Найдено библиотек Steam: {found.Libraries.Length}, Linux-игр: {found.Games.Length}, пар раннер/архив: {found.Runners.Length}.\n"
-            + "Выберите найденный вариант во вкладке «Раннеры» и подтвердите его добавление. Совместимость пары требует проверки."
-            + (found.Warnings.Length == 0 ? "" : "\n" + string.Join("\n", found.Warnings));
+        SetLog(() => F("discovery.summary", found.Libraries.Length, found.Games.Length, found.Runners.Length)
+            + T("discovery.instructions")
+            + (found.Warnings.Length == 0 ? "" : "\n" + string.Join("\n", found.Warnings)));
     }
     private async Task RestoreSteam()
     {
         var game = Value(steamDirectory);
         await Task.Run(() => SteamInstaller.Restore(game));
-        log.Text = "Восстановлены файлы игры до установки мода: " + game;
+        SetLog(() => F("steam.restored", game));
     }
     private async Task Build(bool create)
     {
@@ -245,21 +312,18 @@ public sealed class MainWindow : Window
         {
             using var prepared = await ArchiveInput.PrepareAsync(mod, baseline, mod.EndsWith(".xdelta", StringComparison.OrdinalIgnoreCase));
             var plan = database.Plan(ArchiveInspector.Inspect(prepared.Path), id.Length == 0 ? null : id);
-            var text = $"{plan.Archive.Metadata.GameName}: GMS {plan.Archive.Metadata.VersionString}, BC{plan.Archive.Metadata.BytecodeVersion}\n"
-                + $"Runner: {plan.Runner?.Id ?? "не найден"}\n"
-                + (plan.Evidence == "SameArchiveAsReference" ? "Архив совпадает с эталоном по SHA256.\n" : "Совместимость предполагается по метаданным.\n")
-                + string.Join("\n", plan.Blockers.Concat(plan.Warnings));
+            string? built = null, backup = null;
             if (create)
             {
                 if (standalone)
                 {
-                    if (string.IsNullOrWhiteSpace(destination)) throw new ArgumentException("Выберите новую папку результата.");
-                    var built = PackageBuilder.Create(plan, destination, resourcePaths, libraryPaths, acknowledged, prepared.InputHashes);
-                    text += "\n\nСобрано: " + built + "\nЗапуск: bash launch.sh. Прохождение ещё не проверено.";
+                    if (string.IsNullOrWhiteSpace(destination)) throw new ArgumentException(T("error.output")) { Data = { ["GmmtLocalizationKey"] = "error.output" } };
+                    built = PackageBuilder.Create(plan, destination, resourcePaths, libraryPaths, acknowledged, prepared.InputHashes);
+
                 }
                 else
                 {
-                    if (string.IsNullOrWhiteSpace(game)) throw new ArgumentException("Выберите папку Linux-игры в Steam.");
+                    if (string.IsNullOrWhiteSpace(game)) throw new ArgumentException(T("error.steam")) { Data = { ["GmmtLocalizationKey"] = "error.steam" } };
                     var temporaryPackage = Path.Combine(Path.GetTempPath(), "gmmt-steam-package-" + Guid.NewGuid().ToString("N"));
                     try
                     {
@@ -268,18 +332,23 @@ public sealed class MainWindow : Window
                         var resources = Directory.Exists(originalAssets) ? new[] { originalAssets }.Concat(resourcePaths).ToArray() : resourcePaths;
                         var dependencies = Directory.Exists(originalLibraries) ? new[] { originalLibraries }.Concat(libraryPaths).ToArray() : libraryPaths;
                         PackageBuilder.Create(plan, temporaryPackage, resources, dependencies, acknowledged, prepared.InputHashes);
-                        var backup = SteamInstaller.Install(temporaryPackage, game);
-                        text += "\n\nМод установлен: " + game + "\nРезервная копия: " + backup + "\nЗапускайте нативную Linux-версию игры через Steam. Прохождение ещё не проверено.";
+                        backup = SteamInstaller.Install(temporaryPackage, game);
+
                     }
                     finally { if (Directory.Exists(temporaryPackage)) Directory.Delete(temporaryPackage, true); }
                 }
             }
-            return (Text: text, CanPackage: plan.CanPackage);
+            return (Plan: plan, Built: built, Backup: backup);
         });
-        log.Text = result.Text;
-        if (!result.CanPackage)
+        SetLog(() => F("build.summary", result.Plan.Archive.Metadata.GameName, result.Plan.Archive.Metadata.VersionString,
+                result.Plan.Archive.Metadata.BytecodeVersion, result.Plan.Runner?.Id ?? T("runner.missing"))
+            + T(result.Plan.Evidence == "SameArchiveAsReference" ? "evidence.exact" : "evidence.metadata")
+            + string.Join("\n", result.Plan.Blockers.Concat(result.Plan.Warnings))
+            + (result.Built == null ? "" : F("build.complete", result.Built))
+            + (result.Backup == null ? "" : F("steam.complete", game, result.Backup)));
+        if (!result.Plan.CanPackage)
         {
-            status.Text = "Подбор заблокирован · проверьте результат";
+            SetStatus("status.blocked");
             status.Foreground = Brush.Parse("#FFCE8C");
         }
     }

@@ -1,4 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
   <ItemGroup><ProjectReference Include="../../src/Gmmt.Runtime/Gmmt.Runtime.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Gmmt.Desktop/LocalizationService.cs" Link="LocalizationService.cs" />
+    <EmbeddedResource Include="../../src/Gmmt.Desktop/Localization/en.json" LogicalName="Gmmt.Desktop.Localization.en.json" />
+    <EmbeddedResource Include="../../src/Gmmt.Desktop/Localization/ru.json" LogicalName="Gmmt.Desktop.Localization.ru.json" />
+  </ItemGroup>
 </Project>

@@ -1,73 +1,70 @@
 # GMMT
 
-**GMMT собирает отдельную Linux-копию мода для GameMaker с помощью совместимого локального раннера.** Пакет можно сохранить отдельно или установить вместо нативной игры в Steam с резервной копией и восстановлением. Программа читает `data.win` / `game.unx` или восстанавливает архив из xdelta-патча, подбирает Linux-движок из вашего каталога и упаковывает его вместе с ресурсами и скриптом запуска.
+**English** · [Русский](README.ru.md)
 
-Игровой архив переносится побайтно: GMMT не переписывает GML и не понижает версию движка. Это позволяет исследовать запуск Windows-модов под Linux там, где существует подходящий нативный раннер.
+**GMMT builds native Linux packages for GameMaker mods using compatible runners from your local games.** Save a package in its own folder or install it into a native Steam game with a backup and restoration. GMMT reads `data.win` / `game.unx`, or reconstructs an archive from an xdelta patch, selects a Linux runner from your catalog, and packages the archive with resources and a launcher.
 
-> Проект экспериментальный. Совпадение метаданных означает предварительный подбор; работоспособность конкретного мода подтверждается запуском и игровыми тестами.
+The mod archive is copied byte for byte. GMMT does not rewrite GML or downgrade the game engine. It explores running Windows-origin mod data on Linux where a suitable native runner exists.
 
-![Интерфейс GMMT](docs/images/desktop.png)
+> This is an experimental project. Matching metadata identifies candidates; compatibility with a particular mod still needs launch and gameplay testing.
 
-## Возможности
+![GMMT desktop interface](docs/images/desktop-en.png)
 
-- Настольный интерфейс на Avalonia: сборка мода, проверка подбора и управление каталогом раннеров.
-- Автопоиск библиотек Steam, папок нативных игр и локальных Linux-раннеров, включая дополнительные диски и Flatpak Steam.
-- CLI для ручных экспериментов и автоматизации.
-- Входные архивы `data.win` / `game.unx` и `.xdelta` с чистым **Windows-архивом** нужной версии игры.
-- Подбор по версии GameMaker и байткода, проверка ELF-архитектуры и SHA256 раннера.
-- Предпочтение раннера, чей эталонный архив полностью совпадает с входным.
-- Объединение внешних ресурсов и добавление подготовленных Linux-библиотек.
-- Отдельный результат без изменения установленной игры; существующая папка результата не перезаписывается.
-- Манифест с контрольными суммами, основанием подбора, предупреждениями и составом файлов.
-- Сборки приложения в AppImage, deb, rpm и переносимом tar.zst.
+## Features
 
-Старый эксперимент с diff/transplant и GMS2 → GMS1 сохранён в [`old/translation`](old/translation/README.md). Он остаётся доступен для дальнейших исследований.
+- Avalonia desktop interface for packaging, compatibility planning and runner registration.
+- Automatic discovery of Steam libraries, native game folders and local runners, including libraries on other drives and Flatpak Steam.
+- English and Russian UI, system-language detection and a persistent language selector.
+- CLI for experiments and automation.
+- `data.win` / `game.unx` input, or `.xdelta` with the exact clean **Windows archive** required by the patch.
+- Runner selection using GameMaker/bytecode metadata, ELF architecture and SHA256 checks.
+- Preference for runners whose reference archive exactly matches the input.
+- Resource overlays and manually prepared Linux libraries.
+- Separate output folders, or reversible installation into a native Linux Steam game.
+- Output manifests recording hashes, selection evidence, warnings and packaged files.
+- AppImage, deb, rpm and portable tar.zst application builds.
 
-## Системные требования
+The earlier diff/transplant and GMS2 → GMS1 experiment is preserved in [`old/translation`](old/translation/README.md) for further research.
 
-Готовые пакеты версии **0.2.1** собраны для **Linux x86_64 / amd64** и включают .NET. Устанавливать .NET отдельно для их запуска не требуется.
+## Downloads and requirements
 
-Нужны обычные системные библиотеки: glibc, libgcc/libstdc++, X11 или XWayland, OpenGL/Mesa, fontconfig/freetype, ICU, OpenSSL 3 и zlib. deb/rpm объявляют зависимости; для AppImage и переносимого архива они должны присутствовать в системе. Alpine/musl и ARM этими сборками не покрываются.
+Download application packages from [GitHub Releases](https://github.com/AndrewImm-OP/gmmt/releases/latest). Version **0.2.2** targets **Linux x86_64 / amd64** and includes .NET; installing .NET separately is not required.
 
-Для применения xdelta-патчей требуется **xdelta3** из пакетного менеджера дистрибутива. При работе с уже готовым архивом он не нужен.
+Standard OS libraries are still needed: glibc, libgcc/libstdc++, X11 or XWayland, OpenGL/Mesa, fontconfig/freetype, ICU, OpenSSL 3 and zlib. deb/rpm declare dependencies. AppImage and tar.zst rely on these libraries being present. These builds do not cover ARM or Alpine/musl.
 
-Самому игровому раннеру могут понадобиться отдельные библиотеки, Steam runtime или 32-битные зависимости. Включённый .NET обслуживает GMMT, а не заменяет зависимости игры.
+**xdelta3** from your distribution is needed for patch input. Prepared archives do not require it. A selected game runner may need additional libraries, Steam runtime or 32-bit dependencies; GMMT's included .NET runtime does not supply the game's dependencies.
 
-## Установка и запуск
-
-Сборочный скрипт создаёт перечисленные файлы в `dist/`. Готовые пакеты не хранятся в Git; если в репозитории ещё нет опубликованного релиза, их нужно получить у автора или собрать по инструкции ниже.
-
-| Формат | Файл | Применение |
+| Format | Download | Use |
 | --- | --- | --- |
-| AppImage | `GMMT-0.2.1-x86_64.AppImage` | Запуск без системной установки |
-| deb | `gmmt_0.2.1_amd64.deb` | Debian/Ubuntu и совместимые дистрибутивы |
-| rpm | `gmmt-0.2.1-1.x86_64.rpm` | Fedora и совместимые RPM-дистрибутивы |
-| tar.zst | `gmmt-0.2.1-linux-x86_64.tar.zst` | Переносимая папка, в том числе для Arch/CachyOS |
+| AppImage | [GMMT-0.2.2-x86_64.AppImage](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/GMMT-0.2.2-x86_64.AppImage) | Run without system installation |
+| deb | [gmmt_0.2.2_amd64.deb](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt_0.2.2_amd64.deb) | Debian/Ubuntu and compatible distributions |
+| rpm | [gmmt-0.2.2-1.x86_64.rpm](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt-0.2.2-1.x86_64.rpm) | Fedora and compatible RPM distributions |
+| tar.zst | [gmmt-0.2.2-linux-x86_64.tar.zst](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.2/gmmt-0.2.2-linux-x86_64.tar.zst) | Portable folder, including Arch/CachyOS |
 
 ### AppImage
 
 ```sh
-chmod +x GMMT-0.2.1-x86_64.AppImage
-./GMMT-0.2.1-x86_64.AppImage
+chmod +x GMMT-0.2.2-x86_64.AppImage
+./GMMT-0.2.2-x86_64.AppImage
 
-# CLI из того же файла
-./GMMT-0.2.1-x86_64.AppImage --cli --help
+# CLI from the same file
+./GMMT-0.2.2-x86_64.AppImage --cli --help
 ```
 
-Если система не предоставляет FUSE, используйте режим извлечения и запуска:
+If FUSE is unavailable, use extract-and-run:
 
 ```sh
-./GMMT-0.2.1-x86_64.AppImage --appimage-extract-and-run
-./GMMT-0.2.1-x86_64.AppImage --appimage-extract-and-run --cli --help
+./GMMT-0.2.2-x86_64.AppImage --appimage-extract-and-run
+./GMMT-0.2.2-x86_64.AppImage --appimage-extract-and-run --cli --help
 ```
 
-Подробнее: [официальная документация AppImage о FUSE](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
+See the [official AppImage FUSE documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
 
 ### deb
 
 ```sh
-sudo apt install ./gmmt_0.2.1_amd64.deb
-# Только если нужны xdelta-патчи:
+sudo apt install ./gmmt_0.2.2_amd64.deb
+# Only needed for xdelta input:
 sudo apt install xdelta3
 
 gmmt
@@ -77,149 +74,148 @@ gmmt-cli --help
 ### rpm
 
 ```sh
-sudo dnf install ./gmmt-0.2.1-1.x86_64.rpm
+sudo dnf install ./gmmt-0.2.2-1.x86_64.rpm
 sudo dnf install xdelta3
 
 gmmt
 gmmt-cli --help
 ```
 
-Пакеты пока не подписаны. deb/rpm устанавливают файлы приложения в `/opt/gmmt`, команды — в `/usr/bin`, а ярлык — в меню приложений. Дистрибутивы могут различаться названиями зависимостей; установка на каждом из них требует отдельной проверки.
+Packages are currently unsigned. deb/rpm install the payload under `/opt/gmmt`, commands in `/usr/bin` and an application-menu entry. Dependency names differ between distributions; actual installation must be verified on each target distribution.
 
-### Переносимый архив
+### Portable archive
 
 ```sh
-tar --zstd -xf gmmt-0.2.1-linux-x86_64.tar.zst
+tar --zstd -xf gmmt-0.2.2-linux-x86_64.tar.zst
 ./GMMT.AppDir/AppRun
 ./GMMT.AppDir/AppRun --cli --help
 ```
 
-Архив сохраняет исполняемые разрешения при извлечении на обычную Linux-файловую систему. Для внешних дисков с `noexec` перенесите приложение на диск, где разрешён запуск.
+Extract onto a Linux filesystem that allows executable files. If an external drive is mounted with `noexec`, move the application to an executable filesystem.
 
-Для проверки скачанных файлов выполните `sha256sum -c SHA256SUMS` в папке с пакетами. `build-info.json` содержит версию SDK, архитектуру, исходный коммит и признак изменений рабочего дерева.
+Download `SHA256SUMS` alongside the packages and run `sha256sum -c SHA256SUMS`. `build-info.json` records the SDK version, architecture, source commit and dirty-worktree flag. Application builds contain no game archives, mods, saves or runners.
 
-## Быстрый старт в интерфейсе
+## Interface language
 
-### 1. Добавьте Linux-runner
+On first launch, the UI follows the system language: Russian for a Russian locale, English otherwise. The selector in the top-right corner offers **System / English / Русский**. Switching applies immediately without resetting entered paths, the installation mode, selected tab or results.
 
-При открытии GMMT автоматически ищет библиотеки Steam, включая пути из `libraryfolders.vdf`, стандартный Steam и Flatpak Steam. Найденные нативные игры появятся в списке выбора папки, а пары **Linux ELF + игровой архив** — во вкладке **«Раннеры»**. При выборе пары пути раннера, эталонного архива и доступного Steam scout заполняются автоматически.
+The preference is stored in the user's local application data directory, normally `~/.local/share/gmmt/settings.json`. Set `GMMT_SETTINGS` to use a separate settings file. **System** restores automatic detection; an explicit choice takes precedence on subsequent launches.
 
-Также проверяются папки `~/Downloads` и `~/Загрузки`. Для распакованных модов в другом месте раскройте **«Дополнительные папки поиска»**, добавьте папки и нажмите **«Повторить поиск раннеров»**. Поиск ограничен глубиной и числом папок; архивы ZIP автоматически не распаковываются.
+CLI output, machine-readable manifest fields and low-level third-party/OS diagnostics remain in English. Native file dialogs also follow platform behavior. English is the repository's primary language; [README.ru.md](README.ru.md) provides the Russian user guide. See [the localization guide](docs/localization.md) to maintain translations.
 
-Обнаружение не доказывает совместимость пары: установленный `game.unx` уже мог быть модифицирован. Проверьте, что выбранный эталон работает с найденным раннером, затем нажмите **«Добавить runner»**. Профили автоматически не записываются и игровые файлы при поиске не меняются.
+## Desktop quick start
 
-Если подходящий вариант не найден, укажите пути вручную:
+### 1. Find and register a Linux runner
 
-1. Уникальный ID, например `undertale-linux`.
-2. Linux-исполняемый файл раннера в формате ELF.
-3. Эталонный `game.unx` / `data.win` игры, которая уже работает с этим раннером.
-4. При необходимости — `steam-runtime/run.sh` из локального Steam scout.
+On opening, GMMT searches standard and Flatpak Steam locations and libraries listed in `libraryfolders.vdf`. Detected native games appear in the game-folder selector; **Linux ELF + archive** candidates appear in the **Runners** tab. Selecting a candidate fills its runner, reference archive and available Steam scout paths.
 
-Нажмите **«Добавить runner»**. Регистрация читает метаданные и контрольные суммы; она не запускает игру и не сертифицирует совместимость.
+`~/Downloads` and `~/Загрузки` are also searched. For extracted Linux mods elsewhere, open **Additional search folders**, add folders and select **Search for runners again**. Search depth and directory counts are bounded; ZIP files are not extracted automatically.
 
-Раннер и эталонный архив предоставляете вы. В сборки GMMT не входят игровые движки, игры, моды или сохранения.
+Discovery does not prove the pair works: an installed `game.unx` may already be modified. Confirm that the reference runs with the candidate, then select **Add runner**. Discovery does not automatically register profiles or change game files. Manually supplied files remain supported.
 
-### 2. Подготовьте мод
+A profile needs:
 
-На вкладке **«Сборка мода»** выберите архив мода либо `.xdelta`.
+1. A unique ID, for example `undertale-linux`.
+2. A native Linux ELF runner.
+3. A reference `game.unx` / `data.win` known to work with that runner.
+4. Optionally, a local Steam scout `steam-runtime/run.sh`.
 
-- Для `.xdelta` раскройте **«Дополнительные настройки и xdelta»** и выберите чистый **Windows** `data.win`, рассчитанный именно на этот патч. Linux-архив похожей игры не является заменой.
-- Добавьте папки внешних ресурсов: сначала ресурсы оригинала, затем мода. Каждая папка — отдельная строка. Более поздние файлы с тем же относительным путём заменяют более ранние.
-- Укажите **новую** папку результата. Кнопка **«Куда сохранить…»** выбирает родительскую папку и предлагает внутри неё `gmmt-linux-package`; путь можно отредактировать.
-- Если необходимо, укажите ID раннера и папки Linux-библиотек в дополнительных настройках.
+Registration records metadata and hashes. It does not execute or certify the runner. You supply the runner and reference; the application does not download game engines.
 
-### 3. Проверьте и соберите
+### 2. Prepare a mod
 
-**«Проверить совместимость»** анализирует архив и показывает выбранного кандидата, предупреждения и блокировки. Если кандидатов несколько, укажите конкретный ID.
+In **Build mod**, choose a prepared archive or `.xdelta` patch.
 
-**«Собрать Linux-пакет»** создаёт готовую папку. При обнаружении нативных расширений потребуется вручную подготовить их Linux-зависимости и отметить соответствующий пункт в дополнительных настройках. Эта отметка подтверждает вашу проверку; GMMT не преобразует Windows DLL в Linux SO.
+- For xdelta, open **Advanced settings and xdelta** and select the clean **Windows** `data.win` expected by that patch. A Linux archive from a similar game is not a substitute.
+- Add external resource folders, one per line: original resources first, mod resources afterward. Later files replace earlier files at the same relative path.
+- Keep **Build in a separate folder** checked and choose a **new** output folder. **Save location…** selects a parent and proposes `gmmt-linux-package` inside it; you can edit the path.
+- Supply a runner ID or Linux library folders in advanced settings when necessary.
 
-Состояние работы и подробный результат закреплены внизу окна. При ошибке сообщение содержит причину; исходные файлы не заменяются.
+### 3. Check and package
 
-### 4. Запустите полученную игру
+**Check compatibility** reports the candidate, warnings and blockers. If multiple candidates remain, select an explicit runner ID.
+
+**Build Linux package** creates the output. When native extensions are detected, prepare their Linux counterparts/libraries and acknowledge the review in advanced settings. That acknowledgement records your review; GMMT does not convert Windows DLLs into Linux SOs.
+
+Status and details remain pinned below the scrollable form. Work happens off the UI thread. Existing output folders are never overwritten.
+
+### 4. Launch the generated game
 
 ```sh
 cd /path/to/new/linux-package
 bash launch.sh
 ```
 
-Проверьте хотя бы меню, управление, загрузку ресурсов, звук и сохранения. Затем тестируйте характерные сцены и новые механики мода. Успешная сборка пакета сама по себе не означает успешное прохождение.
+Check the menu, controls, resource loading, sound and saves, then exercise the mod's characteristic scenes and mechanics. A completed package is not a completed gameplay test.
 
-## Установка мода вместо игры Steam
+## Install into a Steam game
 
-Галочка **«Собирать в отдельную папку»** включена по умолчанию. Снимите её, чтобы установить мод в существующую папку игры. Появятся выбор папки Linux-игры и кнопка восстановления. Основное действие сменится на **«Установить мод в Steam»**.
+**Build in a separate folder** is checked by default. Uncheck it to show the detected-game selector, a game-folder picker and restoration action. The primary action becomes **Install mod into Steam**.
 
-1. Закройте игру и выберите её папку через Steam → свойства → установленные файлы → обзор.
-2. Выберите игру из найденного списка или укажите папку вручную. Используйте нативную Linux-версию с `runner`, `assets/game.unx` и `run.sh`. Установка в Windows/Proton-версию пока не поддерживается.
-3. Выберите мод и совместимый раннер. Внешние ресурсы и библиотеки установленной игры автоматически добавляются первыми; выбранные вами папки накладываются поверх них.
-4. Нажмите **«Установить мод в Steam»**. Программа сначала собирает и проверяет пакет, затем сохраняет заменяемые файлы в `.gmmt-original` внутри папки игры и устанавливает мод.
-5. При штатном запуске через `run.sh` Steam запускает мод. Пользовательские параметры запуска, которые обходят этот скрипт, нужно убрать. Полный запуск кнопкой Steam ещё требует отдельной проверки.
+1. Close the game. Find its installed folder through Steam's properties → Installed Files → Browse, or choose a detected game.
+2. Use a native Linux installation containing `runner`, `assets/game.unx` and `run.sh`. Windows/Proton replacement is not supported.
+3. Choose a mod and compatible runner. Installed assets and `lib` folders are prepended automatically; your selected overlays are applied afterward.
+4. Select **Install mod into Steam**. GMMT prepares/verifies a package, backs up managed originals under `.gmmt-original` and installs the mod.
+5. A standard Steam launch through `run.sh` uses the mod launcher. Remove custom launch options that bypass this script. Testing the actual Steam Play button remains a separate verification task.
 
-Резервная копия содержит состояние **до установки**, которое уже могло быть модифицировано. GMMT не объявляет его гарантированно чистой Steam-версией. Повторная установка блокируется до восстановления, чтобы не затереть резервную копию.
+The backup preserves the **pre-install state**, which can already contain another modification; it is not certified vanilla Steam data. Another installation is blocked until restoration to protect the original backup.
 
-Для возврата закройте игру и нажмите **«Восстановить файлы до установки мода»**. Исходные файлы и разрешения восстанавливаются, добавленные GMMT файлы удаляются. Если файлы мода или резервной копии изменились, обычное восстановление остановится с объяснением. Не удаляйте `.gmmt-original` вручную. Журнал позволяет возобновить прерванную установку/восстановление; при повреждении исходных файлов потребуется ручная диагностика.
+Close the game and select **Restore pre-install game files** to undo installation. GMMT restores original contents/permissions and removes added managed files. If installed files or the backup changed, ordinary restoration stops and retains the backup. Do not delete `.gmmt-original` to bypass a failure. The journal supports resuming interrupted transitions; damaged backups require manual diagnosis.
 
-Steam может заменить мод при обновлении или проверке целостности. Перед этими действиями лучше восстановить файлы через GMMT. Сохранения вне папки игры не меняются.
+Steam updates or integrity verification can replace mod files. Restore with GMMT before those operations. Saves outside the game directory are not modified.
 
-CLI умеет устанавливать уже собранный пакет и восстанавливать игру:
+CLI installation/restoration of a prepared package:
 
 ```sh
 gmmt-cli install --package "/path/to/linux-package" --game-dir "/path/to/Steam/steamapps/common/Undertale"
 gmmt-cli restore --game-dir "/path/to/Steam/steamapps/common/Undertale"
 ```
 
-## Как устроен подбор
+## How runner selection works
 
-Каталог хранит ID, путь и SHA256 раннера, ELF-архитектуру, версию движка/байткода эталонного архива и его SHA256. При подборе GMMT:
+Profiles contain the runner ID, path, SHA256, ELF architecture, reference engine/bytecode metadata and reference SHA256. Selection:
 
-1. Отклоняет YYC-архивы и несовместимые версии.
-2. Ищет профили с совпадающей версией движка и байткода.
-3. Предпочитает профиль с точно совпавшим эталонным архивом.
-4. Требует явный ID при неоднозначности.
-5. Проверяет наличие, контрольную сумму и архитектуру выбранного ELF, а также доступность указанного Steam runtime.
+1. Rejects YYC archives and incompatible versions.
+2. Matches the archive's engine and bytecode metadata.
+3. Prefers a profile with an identical reference archive.
+4. Requires an explicit ID when candidates are ambiguous.
+5. Checks the selected runner's existence, hash and architecture, plus the optional Steam runtime path.
 
-В манифесте `SameArchiveAsReference` означает совпадение архива с эталоном; `MatchingMetadataOnly` — предварительное совпадение по метаданным. Ни одно из этих значений не является автоматическим игровым тестом.
+`SameArchiveAsReference` means an exact reference checksum match. `MatchingMetadataOnly` means an inferred match. Neither represents an automatic gameplay test.
 
-По умолчанию каталог находится в пользовательской папке локальных данных, обычно `~/.local/share/gmmt/runners.json`. Его можно изменить в интерфейсе, через `--catalog FILE` или переменную `GMMT_CATALOG`.
-
-Пути в каталоге локальные. При переносе на другой компьютер зарегистрируйте раннеры заново или поправьте пути. Каталоги не входят в репозиторий и установочные пакеты.
+The default catalog is in the user's local data directory, normally `~/.local/share/gmmt/runners.json`. Change it in the desktop, with `--catalog FILE`, or through `GMMT_CATALOG`. Catalog paths are local: register runners again or correct paths on another machine. Catalogs are excluded from source and application builds.
 
 ## CLI
 
-После установки deb/rpm используйте `gmmt-cli`. Для AppImage — `./GMMT-0.2.1-x86_64.AppImage --cli`, для tar.zst — `./GMMT.AppDir/AppRun --cli`. В примерах ниже показан вариант deb/rpm.
+With deb/rpm, use `gmmt-cli`. For AppImage, use `./GMMT-0.2.2-x86_64.AppImage --cli`; for tar.zst, use `./GMMT.AppDir/AppRun --cli`. Examples use installed deb/rpm commands.
 
 ```sh
-# Найти игры и кандидаты в раннеры, ничего не записывая
+# Read-only discovery
 gmmt-cli discover
-# Дополнительные корни поиска:
 gmmt-cli discover --steam-root "/path/to/Steam" --runner-root "/path/to/extracted/linux-mod"
 
-# Прочитать метаданные и хеш архива
+# Inspect archive metadata and hash
 gmmt-cli inspect --archive "/path/to/mod/data.win"
 
-# Зарегистрировать локальный раннер
+# Register a local runner
 gmmt-cli register-runner \
   --id gms2-local \
   --runner "/path/to/linux/runner" \
   --reference "/path/to/working/reference/game.unx"
-
-# Необязательный аргумент при регистрации:
-# --steam-runtime "/path/to/steam-runtime/run.sh"
+# Optional: --steam-runtime "/path/to/steam-runtime/run.sh"
 
 gmmt-cli runners
-
 gmmt-cli plan --archive "/path/to/mod/data.win"
-# Явный выбор при нескольких кандидатах:
 gmmt-cli plan --archive "/path/to/mod/data.win" --runner-id gms2-local
 
-# Собрать из готового архива
+# Prepared archive
 gmmt-cli package \
   --archive "/path/to/mod/data.win" \
   --assets "/path/to/original/assets" \
   --assets "/path/to/mod/assets" \
   --output "/path/to/new/linux-package"
 
-# Собрать из патча
+# Patch input
 gmmt-cli package \
   --patch "/path/to/mod.xdelta" \
   --vanilla "/path/to/clean/windows/data.win" \
@@ -227,7 +223,7 @@ gmmt-cli package \
   --assets "/path/to/mod/assets" \
   --output "/path/to/new/linux-package"
 
-# При необходимости добавьте:
+# Optional package flags:
 # --runner-id gms2-local
 # --libraries "/path/to/prepared/linux/libraries"
 # --native-extensions-reviewed
@@ -236,64 +232,67 @@ gmmt-cli package \
 gmmt-cli --help
 ```
 
-Команды возвращают JSON, сообщения об ошибках идут в stderr. Коды завершения: `0` — успех; `1` — ошибка входных данных/выполнения; `2` — подбор или упаковка заблокированы.
+Commands return JSON; errors go to stderr. Exit codes: `0` success, `1` input/execution error, `2` blocked selection or packaging.
 
-## Что находится в игровом пакете
+## Generated game package
 
 ```text
 linux-package/
-├── runner                  # Выбранный Linux ELF
+├── runner                  # Selected Linux ELF
 ├── assets/
-│   ├── game.unx            # Исходный архив без изменений
-│   └── …                   # Внешние ресурсы
-├── lib/                    # Необязательные локальные библиотеки
-├── launch.sh               # Скрипт запуска
-└── gmmt-package.json       # Метаданные, предупреждения, контрольные суммы
+│   ├── game.unx            # Unchanged input archive
+│   └── …                   # External resources
+├── lib/                    # Optional prepared libraries
+├── launch.sh               # Launcher
+└── gmmt-package.json       # Metadata, warnings and hashes
 ```
 
-Windows-установщики, скрипты, патчи и лишние основные архивы не копируются как ресурсы. Деревья с символическими ссылками отклоняются. Пакет сначала собирается во временной соседней папке и становится результатом только после проверки контрольных сумм архива и раннера.
+Windows installers, scripts, patches and redundant main archives are excluded from assets. Symlinked resource trees are rejected. A package is assembled in a temporary sibling directory and published after the archive/runner checksums match.
 
-`GameplayVerified` остаётся `false`: программа не выполняет игровые тесты автоматически. Если выбран Steam runtime, он остаётся внешней локальной зависимостью; на другом компьютере его путь можно переопределить через `GMMT_STEAM_RUNTIME`.
+`GameplayVerified` stays `false`: GMMT does not perform automatic gameplay tests. An optional registered Steam runtime remains an external dependency; override its path on another machine with `GMMT_STEAM_RUNTIME`.
 
-## Проверенные случаи и ограничения
+## Evidence and limitations
 
-| Случай | Что проверено | Чего проверка не доказывает |
+| Case | Verified evidence | Not established |
 | --- | --- | --- |
-| Undertale Together, Windows-архив + оригинальный Linux-runner GMS1 | Сборка и запуск через сгенерированный launcher | Прохождение всех кооперативных сцен |
-| Undertale Red & Yellow, архив из Windows-патча + Linux-runner официального порта GMS2 | Сборка и запуск; отдельно проверены старт/ввод на официальном контроле | Универсальную поддержку GMS2-модов без Linux-порта |
-| Пакеты GMMT 0.2.1 | Проверка файлов и автономного CLI; запуск интерфейса на CachyOS | Установку и работу на всех Debian/Fedora-подобных системах |
+| Undertale Together Windows archive + original GMS1 Linux runner | Package construction and launcher startup | All cooperative scenes/gameplay |
+| Undertale Red & Yellow Windows-patch archive + official GMS2 Linux donor | Construction/startup; control package also tested for initial input | General GMS2 mods without a Linux port |
+| Reversible Steam replacement | Real Together package installed into a copy of Undertale, run.sh startup, SHA256-complete restoration | Clicking Play in the real Steam client |
+| Application distribution packages | Extracted payloads, standalone CLI, native dependencies and GUI smoke checks on CachyOS | Installation on every Debian/Fedora-like distribution |
 
-У UTRY существует Linux-порт; у Together доступны инструкции для Linux. Эти случаи полезны как контрольные примеры, но не заменяют тест отдельного Windows-мода без готового порта.
+UTRY has a Linux port; Together has Linux instructions. They are useful controls, not a replacement for testing a Windows-only mod with no existing Linux port.
 
-Не реализованы:
+Not implemented:
 
-- Универсальное преобразование GMS2 → GMS1.
-- Автоматическая загрузка и раздача раннеров.
-- Преобразование Windows DLL, YYC-кода или специфичных Windows API.
-- Автоматическая подготовка всех внешних ресурсов и библиотек.
-- Автоматическое доказательство игровой совместимости.
+- Universal GMS2 → GMS1 translation.
+- Runner downloads or redistribution.
+- Windows DLL, YYC or platform-specific API conversion.
+- Fully automatic preparation of external resources and native dependencies.
+- Automatic proof of gameplay compatibility.
 
-Даже похожие игры могут требовать разные раннеры. Несовпадение семантики, расширений и платформенных функций нужно диагностировать на конкретном моде.
+Similar games can still require different runners. Engine semantics, extensions and platform functions must be assessed for each mod.
 
-## Решение частых проблем
+## Troubleshooting
 
-| Симптом | Что проверить |
+| Symptom | Check |
 | --- | --- |
-| Runner не найден | Есть ли профиль для версии движка и байткода именно этого архива |
-| Несколько кандидатов | Укажите ID в дополнительных настройках или `--runner-id` |
-| Runner изменился после регистрации | Проверьте файл и зарегистрируйте его под новым ID |
-| xdelta завершается ошибкой | Установлен ли xdelta3; совпадает ли чистый Windows-архив с версией, ожидаемой патчем |
-| Папка результата уже существует | Выберите новый путь; GMMT не перезаписывает существующую папку |
-| Обнаружены native extensions | Подготовьте Linux-эквиваленты и библиотеки; отметка проверки не устраняет несовместимость |
-| AppImage не запускается из-за FUSE | Используйте `--appimage-extract-and-run` |
-| Игра не видит звук/медиа | Проверьте папки ресурсов и порядок их объединения |
-| Игра требует библиотеку/32-bit runtime | Проверьте зависимости самого раннера; добавьте совместимые библиотеки или Steam runtime |
+| No runner found | Register a profile matching this archive's engine/bytecode metadata |
+| Multiple candidates | Specify an ID in advanced settings or `--runner-id` |
+| Runner changed | Verify the binary and register it under a new ID |
+| xdelta fails | Install xdelta3 and use the exact clean Windows baseline expected by the patch |
+| Output exists | Choose a new folder; GMMT does not overwrite standalone outputs |
+| Native extensions detected | Prepare Linux replacements/libraries; the acknowledgement does not fix incompatibility |
+| AppImage FUSE failure | Use `--appimage-extract-and-run` |
+| Missing media | Check resource folders and overlay order |
+| Runner needs libraries/32-bit support | Supply compatible dependencies or a suitable Steam runtime |
+| Steam backup already exists | Restore it before another installation |
+| Restoration refuses changed files | Preserve the backup and inspect the journal/hashes; do not force deletion |
 
-Подробности экспериментов, контрольные суммы и известные особенности среды находятся в [журнале разработки и тестов](docs/testing/2026-10-04-undertale-handoff.md).
+The [development/testing journal](docs/testing/2026-10-04-undertale-handoff.md) records exact experiments, input hashes, commands and remaining verification work.
 
-## Сборка из исходников
+## Build from source
 
-Нужны Git и **.NET 10 SDK**. Репозиторий использует закреплённые Git-подмодули UndertaleModTool и Underanalyzer.
+Requirements: Git and **.NET 10 SDK**. UndertaleModTool and Underanalyzer are pinned Git submodules.
 
 ```sh
 git clone --recurse-submodules https://github.com/AndrewImm-OP/gmmt.git
@@ -304,62 +303,63 @@ dotnet src/Gmmt.Desktop/bin/Debug/net10.0/gmmt-desktop.dll
 dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll --help
 ```
 
-Репозиторий пока приватный: клонирование требует доступа. `setup.sh` инициализирует подмодули, применяет совместимые патчи целевых framework и собирает решение. В upstream-коде пока остаются предупреждения nullable/Fody.
+`setup.sh` initializes submodules, applies framework-compatibility patches and builds the solution. Upstream nullable/Fody warnings currently remain.
 
-### Сборка установочных пакетов
+### Build distribution packages
 
-Помимо SDK нужны Python 3.11+, `dpkg-deb`, `rpmbuild`, `tar`, `zstd` и [appimagetool](https://github.com/AppImage/appimagetool). Скрипт выполняет self-contained publish интерфейса и CLI для `linux-x64`, затем собирает все четыре формата без root.
+Install Python 3.11+, `dpkg-deb`, `rpmbuild`, `tar`, `zstd` and [appimagetool](https://github.com/AppImage/appimagetool) in addition to the SDK. The script publishes self-contained desktop/CLI applications for `linux-x64` and builds all four formats without root.
 
 ```sh
-python3 scripts/build-linux.py --version 0.2.1
+python3 scripts/build-linux.py --version 0.2.2
 
-# Собственный путь к инструменту или AppImage runtime для офлайн-упаковки:
+# Custom appimagetool or an existing runtime for offline AppImage packaging:
 python3 scripts/build-linux.py \
-  --version 0.2.1 \
+  --version 0.2.2 \
   --appimagetool /path/to/appimagetool \
   --runtime-file /path/to/runtime-x86_64 \
   --output ./dist
 ```
 
-Первой сборке нужен сетевой доступ к NuGet и, если не задан `--runtime-file`, к источнику runtime AppImage. Скрипт хранит HTTP-кэш и staging в `/tmp`, чтобы сборка работала и с checkout на exFAT. Подробности состава пакетов и их проверки: [docs/packaging.md](docs/packaging.md).
+Initial publication needs NuGet access and, without `--runtime-file`, an AppImage runtime download. HTTP cache and staging live in `/tmp` to support checkouts on exFAT. See [the packaging guide](docs/packaging.md) for layout, dependencies and artifact verification.
 
-### Проверки
+### Tests
 
 ```sh
 dotnet build tests/Gmmt.Runtime.Tests/Gmmt.Runtime.Tests.csproj -m:1
 dotnet run --project tests/Gmmt.Runtime.Tests --no-build
+python3 scripts/verify-linux.py --version 0.2.2
 ```
 
-Тесты покрывают выбор и неоднозначность раннеров, несовпадения версий, изменение файлов, подтверждение native extensions, сохранность архива, существующие папки, атомарный отказ и символические ссылки. Реальные игровые тесты ведутся отдельно, на локальных копиях файлов.
+Tests cover selection/mismatches, ambiguity, file mutations, extension acknowledgement, archive preservation, atomic failures, symlinks, reversible installation, backup integrity, interrupted restoration, discovery and localization/settings. Real game tests use isolated local copies and separate save overlays.
 
-## Структура проекта
+## Repository layout
 
 ```text
-src/Gmmt.Desktop/       Avalonia-интерфейс
-src/Gmmt.Cli/           Командная строка
-src/Gmmt.Runtime/       Каталог, выбор раннера, xdelta и упаковка
-src/Gmmt.Core/          Чтение архива и метаданных
-extern/                Закреплённые сторонние подмодули
-patches/               Патчи сборки зависимостей
-packaging/             Значок и desktop entry
-scripts/               Сборка дистрибутивных пакетов
-tests/                 Проверки runtime/упаковки
-old/translation/       Предыдущий конвертер
-docs/testing/          Подробный журнал и передача проекта
+src/Gmmt.Desktop/       Avalonia UI and English/Russian localization catalogs
+src/Gmmt.Cli/           Command-line interface
+src/Gmmt.Runtime/       Discovery, catalogs, selection, xdelta and installation
+src/Gmmt.Core/          Archive loading and metadata
+extern/                Pinned third-party submodules
+patches/               Dependency build patches
+packaging/             Icon and desktop entry
+scripts/               Distribution builds and test harnesses
+tests/                 Runtime, packaging, discovery and localization checks
+old/translation/       Preserved earlier converter
+docs/testing/          Detailed development journal and agent handoff
 ```
 
-В `experiments/` локально хранятся входные файлы, логи и результаты экспериментов; `dist/` содержит готовые пакеты. Обе папки исключены из Git.
+`experiments/` contains local inputs/logs/results; `dist/` contains application artifacts. Both are ignored by Git. English documentation is primary; historical converter source remains preserved.
 
-## Дальнейшее развитие
+## Further work
 
-- Проверить Windows-мод без готового Linux-порта.
-- Протестировать пакеты в чистых Debian/Ubuntu и Fedora.
-- Расширять каталог измеренной совместимости с указанием точных версий и сценариев проверки.
-- Улучшить диагностику отсутствующих ресурсов и нативных расширений.
-- Исследовать старый конвертер отдельно, сохраняя текущий путь с нативными раннерами.
+- Test a Windows-only mod without an existing native port.
+- Test installation/uninstallation on clean Debian/Ubuntu and Fedora.
+- Record measured runner/archive associations with exact versions and gameplay scenarios.
+- Improve diagnosis of missing resources and native extensions.
+- Continue research on the earlier converter separately from the native-runner path.
 
-## Лицензии и файлы игр
+## Licenses and game files
 
-Отдельная лицензия исходников GMMT пока не выбрана. UndertaleModTool использует GPLv3, Underanalyzer — MPL 2.0; остальные зависимости сохраняют свои лицензии. Пакеты содержат тексты доступных сторонних лицензий в `licenses/` и `THIRD-PARTY-NOTICES.txt`.
+GMMT has no separately assigned source license yet. UndertaleModTool uses GPLv3, Underanalyzer MPL 2.0; other dependencies retain their licenses. Available dependency texts ship under `licenses/` and `THIRD-PARTY-NOTICES.txt`.
 
-Игры, моды, сохранения и раннеры не входят в репозиторий и сборки приложения. Регистрация локального раннера не предоставляет права распространять игровые или модифицированные файлы.
+Games, mods, saves and runners are not included in this repository or application builds. Registering a local runner does not grant redistribution rights to game, engine or mod assets.
