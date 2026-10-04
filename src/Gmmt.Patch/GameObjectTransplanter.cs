@@ -13,6 +13,7 @@ public sealed record GameObjectTransplantResult
     public required string ObjectName { get; init; }
     public required GameObjectTransplantStatus Status { get; init; }
     public int EventCount { get; init; }
+    public int SkippedActionCount { get; init; }
     public string? Diagnostic { get; init; }
 }
 
@@ -96,8 +97,8 @@ public static class GameObjectTransplanter
         {
             if (obj.Name?.Content == objectName)
             {
-                
-            return new GameObjectTransplantResult
+
+                return new GameObjectTransplantResult
                 {
                     ObjectName = objectName,
                     Status = GameObjectTransplantStatus.AlreadyExists,
@@ -109,7 +110,7 @@ public static class GameObjectTransplanter
         // Find in modded
         if (!moddedIdx.Objects.TryGetValue(objectName, out var moddedEntry))
         {
-            
+
             return new GameObjectTransplantResult
             {
                 ObjectName = objectName,
@@ -172,8 +173,10 @@ public static class GameObjectTransplanter
 
             // ParentId is resolved in the second pass (after all objects are created)
 
-            // Clone events
+            // Clone events. For GMS1 safety, transplant objects even when some
+            // GMS2-added event code is unsupported; skip only those actions/events.
             int eventCount = 0;
+            int skippedActionCount = 0;
             if (srcObj.Events is not null)
             {
                 for (int eventTypeIdx = 0; eventTypeIdx < srcObj.Events.Count && eventTypeIdx < newObj.Events.Count; eventTypeIdx++)
@@ -183,68 +186,55 @@ public static class GameObjectTransplanter
 
                     foreach (var srcEvent in srcEventList)
                     {
+                        uint eventSubtype = srcEvent.EventSubtype;
+                        if (eventTypeIdx == (int)EventType.Collision)
+                        {
+                            var resolvedSubtype = ResolveCollisionSubtype(srcEvent.EventSubtype, moddedIdx.Data, targetData);
+                            if (resolvedSubtype is null)
+                            {
+                                skippedActionCount += srcEvent.Actions?.Count ?? 0;
+                                continue;
+                            }
+                            eventSubtype = resolvedSubtype.Value;
+                        }
+
                         var newEvent = new Event
                         {
-                            EventSubtype = srcEvent.EventSubtype,
+                            EventSubtype = eventSubtype,
                         };
 
                         if (srcEvent.Actions is not null)
                         {
                             foreach (var srcAction in srcEvent.Actions)
                             {
-                                var newAction = new EventAction
-                                {
-                                    LibID = srcAction.LibID,
-                                    ID = srcAction.ID,
-                                    Kind = srcAction.Kind,
-                                    UseRelative = srcAction.UseRelative,
-                                    IsQuestion = srcAction.IsQuestion,
-                                    UseApplyTo = srcAction.UseApplyTo,
-                                    ExeType = srcAction.ExeType,
-                                    ActionName = targetData.Strings.MakeString(
-                                        srcAction.ActionName?.Content ?? ""),
-                                    ArgumentCount = srcAction.ArgumentCount,
-                                    Who = srcAction.Who,
-                                    Relative = srcAction.Relative,
-                                    IsNot = srcAction.IsNot,
-                                    UnknownAlwaysZero = srcAction.UnknownAlwaysZero,
-                                };
+                                // Only set CodeId — UTMT handles version-specific
+                                // serialisation of EventAction fields automatically.
+                                // Copying GMS2-specific fields (LibID, Kind, ExeType …)
+                                // into a GMS1 target causes the runner to SIGSEGV.
+                                var newAction = new EventAction();
 
-                                // Resolve code reference in target
                                 if (srcAction.CodeId is not null)
                                 {
                                     var codeEntryName = srcAction.CodeId.Name?.Content;
-                                    if (codeEntryName is not null && targetData.Code is not null)
+                                    if (codeEntryName is null || targetData.Code is null)
                                     {
-                                        foreach (var code in targetData.Code)
-                                        {
-                                            if (code.Name?.Content == codeEntryName)
-                                            {
-                                                newAction.CodeId = code;
-                                                break;
-                                            }
-                                        }
+                                        skippedActionCount++;
+                                        continue;
+                                    }
 
-                                        if (newAction.CodeId is null)
+                                    foreach (var code in targetData.Code)
+                                    {
+                                        if (code.Name?.Content == codeEntryName)
                                         {
-                                            
-            return new GameObjectTransplantResult
-                                            {
-                                                ObjectName = objectName,
-                                                Status = GameObjectTransplantStatus.Failed,
-                                                Diagnostic = $"Code entry '{codeEntryName}' for event {eventTypeIdx} not found in target."
-                                            };
+                                            newAction.CodeId = code;
+                                            break;
                                         }
                                     }
-                                    else
+
+                                    if (newAction.CodeId is null)
                                     {
-                                         
-            return new GameObjectTransplantResult
-                                         {
-                                             ObjectName = objectName,
-                                             Status = GameObjectTransplantStatus.Failed,
-                                             Diagnostic = $"Action has CodeId but no resolvable name in event {eventTypeIdx}."
-                                         };
+                                        skippedActionCount++;
+                                        continue;
                                     }
                                 }
 
@@ -253,7 +243,8 @@ public static class GameObjectTransplanter
                             }
                         }
 
-                        newObj.Events[eventTypeIdx].Add(newEvent);
+                        if (newEvent.Actions.Count > 0)
+                            newObj.Events[eventTypeIdx].Add(newEvent);
                     }
                 }
             }
@@ -274,17 +265,19 @@ public static class GameObjectTransplanter
             targetData.GameObjects.Add(newObj);
             createdObject = newObj;
 
-            
+
             return new GameObjectTransplantResult
             {
                 ObjectName = objectName,
                 Status = GameObjectTransplantStatus.Transplanted,
                 EventCount = eventCount,
+                SkippedActionCount = skippedActionCount,
+                Diagnostic = skippedActionCount > 0 ? $"Skipped {skippedActionCount} unsupported/missing action(s)." : null,
             };
         }
         catch (Exception ex)
         {
-            
+
             return new GameObjectTransplantResult
             {
                 ObjectName = objectName,
@@ -292,5 +285,26 @@ public static class GameObjectTransplanter
                 Diagnostic = $"Exception: {ex.Message}",
             };
         }
+    }
+
+    private static uint? ResolveCollisionSubtype(
+        uint moddedSubtype,
+        UndertaleData moddedData,
+        UndertaleData targetData)
+    {
+        if (moddedSubtype >= moddedData.GameObjects.Count)
+            return null;
+
+        var moddedCollisionObjectName = moddedData.GameObjects[(int)moddedSubtype]?.Name?.Content;
+        if (moddedCollisionObjectName is null)
+            return null;
+
+        for (int i = 0; i < targetData.GameObjects.Count; i++)
+        {
+            if (targetData.GameObjects[i]?.Name?.Content == moddedCollisionObjectName)
+                return (uint)i;
+        }
+
+        return null;
     }
 }

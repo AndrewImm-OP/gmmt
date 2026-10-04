@@ -475,6 +475,15 @@ public static class SpriteTransplanter
         targetData.EmbeddedTextures.Add(newTex);
         textureCloneMap[moddedTexIdx] = newTex;
 
+        // Register in TextureGroupInfo if present (GMS 2.2.1+ only; GMS1 has no TGIN chunk).
+        var tginList = targetData.TextureGroupInfo;
+        if (tginList is { Count: > 0 })
+        {
+            var tg = tginList[0];
+            tg.TexturePages?.Add(
+                new UndertaleResourceById<UndertaleEmbeddedTexture, UndertaleChunkTXTR>(newTex));
+        }
+
         return newTex;
     }
 

@@ -19,3 +19,19 @@ report*.json
 
 # Archives
 *.zip
+
+# Local game/runtime experiments and dependency caches
+experiments/
+*.win
+*.unx
+*.dmp
+*.core
+core
+
+# Development backup artifacts
+*.orig
+*.rej
+gmmt.tar.xz
+
+__pycache__/
+*.pyc

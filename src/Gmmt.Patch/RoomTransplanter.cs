@@ -17,6 +17,10 @@ public sealed record RoomTransplantResult
     public required RoomTransplantStatus Status { get; init; }
     public int LayerCount { get; init; }
     public int GameObjectCount { get; init; }
+    public uint MaxInstanceId { get; init; }
+    public uint MaxTileId { get; init; }
+    public bool AddedToRoomOrder { get; init; }
+    public bool SkippedCreationCode { get; init; }
     public string? Diagnostic { get; init; }
 }
 
@@ -95,6 +99,7 @@ public static class RoomTransplanter
         }
 
         var srcRoom = moddedEntry.Res;
+        bool targetIsGMS1 = (targetData.GeneralInfo?.Major ?? 1) < 2;
 
         try
         {
@@ -103,68 +108,81 @@ public static class RoomTransplanter
                 Name = targetData.Strings.MakeString(roomName),
                 Width = srcRoom.Width,
                 Height = srcRoom.Height,
-                Speed = srcRoom.Speed,
+                Speed = targetIsGMS1 && srcRoom.Speed == 0 ? 30u : srcRoom.Speed,
                 Persistent = srcRoom.Persistent,
                 BackgroundColor = srcRoom.BackgroundColor,
                 DrawBackgroundColor = srcRoom.DrawBackgroundColor,
-                Flags = srcRoom.Flags,
-                World = srcRoom.World,
-                Top = srcRoom.Top,
-                Left = srcRoom.Left,
-                Right = srcRoom.Right,
-                Bottom = srcRoom.Bottom,
-                GravityX = srcRoom.GravityX,
-                GravityY = srcRoom.GravityY,
-                MetersPerPixel = srcRoom.MetersPerPixel,
+                Flags = SanitizeFlags(srcRoom.Flags, targetIsGMS1),
+                World = targetIsGMS1 ? false : srcRoom.World,
+                Top = targetIsGMS1 ? 0 : srcRoom.Top,
+                Left = targetIsGMS1 ? 0 : srcRoom.Left,
+                Right = targetIsGMS1 ? srcRoom.Width : srcRoom.Right,
+                Bottom = targetIsGMS1 ? srcRoom.Height : srcRoom.Bottom,
+                GravityX = targetIsGMS1 ? 0 : srcRoom.GravityX,
+                GravityY = targetIsGMS1 ? 10 : srcRoom.GravityY,
+                MetersPerPixel = targetIsGMS1 ? 0.1f : srcRoom.MetersPerPixel,
             };
 
-            if (srcRoom.Caption?.Content is { } caption)
-                newRoom.Caption = targetData.Strings.MakeString(caption);
+            newRoom.Caption = targetData.Strings.MakeString(srcRoom.Caption?.Content ?? "");
 
-            // Resolve CreationCode
-            try
-            {
-                newRoom.CreationCodeId = ResolveCode(srcRoom.CreationCodeId, targetData, allowMissing: false);
-            }
-            catch (ArgumentException ex)
-            {
-                return new RoomTransplantResult
-                {
-                    RoomName = roomName,
-                    Status = RoomTransplantStatus.Failed,
-                    Diagnostic = ex.Message
-                };
-            }
+            // Resolve CreationCode. When converting GMS2 rooms to GMS1, unsupported
+            // room creation code often contains layer_* calls that have no legacy
+            // equivalent after layer→legacy conversion. Skip it instead of dropping
+            // the whole room.
+            var resolvedCreationCode = ResolveCode(srcRoom.CreationCodeId, targetData, allowMissing: targetIsGMS1);
+            bool skippedCreationCode = srcRoom.CreationCodeId is not null && resolvedCreationCode is null;
+            newRoom.CreationCodeId = resolvedCreationCode;
 
             // Clone legacy backgrounds (8 slots)
             int gameObjectCount = 0;
             CloneLegacyBackgrounds(srcRoom, newRoom, targetData);
             CloneLegacyViews(srcRoom, newRoom, targetData);
 
-            // For GMS2 rooms with layers, instances are placed via layers.
-            // Only clone legacy GameObjects if no layers exist (GMS1 room).
             bool hasLayers = srcRoom.Layers is not null && srcRoom.Layers.Count > 0;
-            if (!hasLayers)
-                gameObjectCount += CloneLegacyGameObjects(srcRoom, newRoom, targetData);
 
-            CloneLegacyTiles(srcRoom, newRoom, targetData);
-
-            // Clone GMS2 layers
             int layerCount = 0;
-            if (srcRoom.Layers is not null)
+
+            if (hasLayers && targetIsGMS1)
             {
-                foreach (var srcLayer in srcRoom.Layers)
+                // GMS2→GMS1 conversion: extract layer data into legacy structures.
+                // GMS1 runner does not understand Layers — do NOT add them to newRoom.
+                gameObjectCount += ConvertLayersToLegacy(srcRoom, newRoom, targetData);
+            }
+            else if (hasLayers)
+            {
+                // GMS2→GMS2: clone layers as-is
+                if (!hasLayers)
+                    gameObjectCount += CloneLegacyGameObjects(srcRoom, newRoom, targetData);
+
+                CloneLegacyTiles(srcRoom, newRoom, targetData);
+
+                if (srcRoom.Layers is not null)
                 {
-                    var newLayer = CloneLayer(srcLayer, newRoom, targetData);
-                    if (newLayer is not null)
+                    foreach (var srcLayer in srcRoom.Layers)
                     {
-                        newRoom.Layers.Add(newLayer);
-                        layerCount++;
+                        var newLayer = CloneLayer(srcLayer, newRoom, targetData);
+                        if (newLayer is not null)
+                        {
+                            newRoom.Layers.Add(newLayer);
+                            layerCount++;
+                        }
                     }
                 }
             }
+            else
+            {
+                // GMS1 source room (no layers): clone legacy structures
+                gameObjectCount += CloneLegacyGameObjects(srcRoom, newRoom, targetData);
+                CloneLegacyTiles(srcRoom, newRoom, targetData);
+            }
+
+            if (targetData.Rooms is null)
+                throw new InvalidOperationException("Target archive has no ROOM chunk.");
 
             targetData.Rooms.Add(newRoom);
+
+            bool addedToRoomOrder = AddToRoomOrder(newRoom, targetData);
+            var (maxInstanceId, maxTileId) = UpdateRoomInstanceCounters(targetData);
 
             return new RoomTransplantResult
             {
@@ -172,6 +190,10 @@ public static class RoomTransplanter
                 Status = RoomTransplantStatus.Transplanted,
                 LayerCount = layerCount,
                 GameObjectCount = gameObjectCount,
+                MaxInstanceId = maxInstanceId,
+                MaxTileId = maxTileId,
+                AddedToRoomOrder = addedToRoomOrder,
+                SkippedCreationCode = skippedCreationCode,
             };
         }
         catch (Exception ex)
@@ -184,6 +206,77 @@ public static class RoomTransplanter
             };
         }
     }
+
+    private static RoomEntryFlags SanitizeFlags(RoomEntryFlags flags, bool targetIsGMS1)
+    {
+        if (!targetIsGMS1)
+            return flags;
+
+        const RoomEntryFlags gms1Flags =
+            RoomEntryFlags.EnableViews |
+            RoomEntryFlags.ShowColor |
+            RoomEntryFlags.DoNotClearDisplayBuffer;
+
+        return flags & gms1Flags;
+    }
+
+    private static bool AddToRoomOrder(UndertaleRoom room, UndertaleData targetData)
+    {
+        var roomOrder = targetData.GeneralInfo?.RoomOrder;
+        if (roomOrder is null)
+            return false;
+
+        foreach (var existingRef in roomOrder)
+        {
+            var existingRoom = existingRef?.Resource;
+            if (ReferenceEquals(existingRoom, room) || existingRoom?.Name?.Content == room.Name?.Content)
+                return false;
+        }
+
+        roomOrder.Add(new UndertaleResourceById<UndertaleRoom, UndertaleChunkROOM>(room));
+        return true;
+    }
+
+    private static (uint maxInstanceId, uint maxTileId) UpdateRoomInstanceCounters(UndertaleData targetData)
+    {
+        uint maxInstanceId = 0;
+        uint maxTileId = 0;
+
+        if (targetData.Rooms is not null)
+        {
+            foreach (var room in targetData.Rooms)
+            {
+                if (room?.GameObjects is not null)
+                {
+                    foreach (var obj in room.GameObjects)
+                    {
+                        if (obj is not null && obj.InstanceID > maxInstanceId)
+                            maxInstanceId = obj.InstanceID;
+                    }
+                }
+
+                if (room?.Tiles is not null)
+                {
+                    foreach (var tile in room.Tiles)
+                    {
+                        if (tile is not null && tile.InstanceID > maxTileId)
+                            maxTileId = tile.InstanceID;
+                    }
+                }
+            }
+        }
+
+        if (targetData.GeneralInfo is not null)
+        {
+            targetData.GeneralInfo.LastObj = Math.Max(targetData.GeneralInfo.LastObj, NextFreeId(maxInstanceId));
+            targetData.GeneralInfo.LastTile = Math.Max(targetData.GeneralInfo.LastTile, NextFreeId(maxTileId));
+        }
+
+        return (maxInstanceId, maxTileId);
+    }
+
+    private static uint NextFreeId(uint maxUsedId) =>
+        maxUsedId == uint.MaxValue ? uint.MaxValue : maxUsedId + 1;
 
     // ── Legacy backgrounds ──────────────────────────────────────
 
@@ -212,7 +305,14 @@ public static class RoomTransplanter
             dst.SpeedY = src.SpeedY;
             dst.Stretch = src.Stretch;
 
-            dst.BackgroundDefinition = ResolveBackground(src.BackgroundDefinition, targetData);
+            var backgroundDefinition = ResolveBackground(src.BackgroundDefinition, targetData);
+            if (dst.Enabled && backgroundDefinition is null)
+            {
+                // GMS1 runner is not robust around enabled room backgrounds
+                // with an invalid BGND reference. Disable instead of writing -1.
+                dst.Enabled = false;
+            }
+            dst.BackgroundDefinition = backgroundDefinition;
         }
     }
 
@@ -246,7 +346,13 @@ public static class RoomTransplanter
             dst.SpeedX = src.SpeedX;
             dst.SpeedY = src.SpeedY;
 
-            dst.ObjectId = ResolveGameObject(src.ObjectId, targetData);
+            var followObject = ResolveGameObject(src.ObjectId, targetData);
+            if (dst.Enabled && src.ObjectId is not null && followObject is null)
+            {
+                // A view following a missing object is safer disabled in GMS1.
+                dst.Enabled = false;
+            }
+            dst.ObjectId = followObject;
         }
     }
 
@@ -271,11 +377,13 @@ public static class RoomTransplanter
                 ScaleY = src.ScaleY,
                 Color = src.Color,
                 Rotation = src.Rotation,
-                ImageSpeed = src.ImageSpeed,
-                ImageIndex = src.ImageIndex,
+                // GMS1 room instances do not serialize ImageSpeed/ImageIndex.
+                // Keep deterministic defaults instead of carrying GMS2 editor-only values.
+                ImageSpeed = 1,
+                ImageIndex = 0,
             };
 
-            dst.ObjectDefinition = ResolveGameObject(src.ObjectDefinition, targetData);
+            dst.ObjectDefinition = ResolveRequiredGameObject(src.ObjectDefinition, targetData, "legacy room instance");
             dst.CreationCode = ResolveCode(src.CreationCode, targetData, allowMissing: false);
             dst.PreCreateCode = ResolveCode(src.PreCreateCode, targetData, allowMissing: false);
 
@@ -313,11 +421,222 @@ public static class RoomTransplanter
             };
 
             // GMS1 uses BackgroundDefinition, GMS2 uses SpriteDefinition
-            dst.BackgroundDefinition = ResolveBackground(src.BackgroundDefinition, targetData);
-            dst.SpriteDefinition = ResolveSprite(src.SpriteDefinition, targetData);
+            bool targetIsGMS1 = (targetData.GeneralInfo?.Major ?? 1) < 2;
+            if (targetIsGMS1)
+            {
+                dst.BackgroundDefinition =
+                    ResolveBackground(src.BackgroundDefinition, targetData) ??
+                    FindOrCreateBackgroundFromSprite(src.SpriteDefinition, targetData);
+
+                if (dst.BackgroundDefinition is null)
+                    continue;
+            }
+            else
+            {
+                // GMS1 uses BackgroundDefinition, GMS2 uses SpriteDefinition
+                dst.BackgroundDefinition = ResolveBackground(src.BackgroundDefinition, targetData);
+                dst.SpriteDefinition = ResolveSprite(src.SpriteDefinition, targetData);
+            }
 
             newRoom.Tiles.Add(dst);
         }
+    }
+
+    // ── GMS2→GMS1 layer conversion ────────────────────────────
+
+    /// <summary>
+    /// Converts GMS2 Layer data into GMS1 legacy room structures.
+    /// GMS1 runner does not understand Layers — this extracts:
+    ///   - Instances layers → legacy GameObjects
+    ///   - Background layers → legacy Backgrounds (8-slot array)
+    ///   - Tiles layers are logged but not converted (GMS2 uses tilemaps,
+    ///     GMS1 uses individual tile objects — no lossless conversion).
+    /// </summary>
+    private static int ConvertLayersToLegacy(
+        UndertaleRoom srcRoom, UndertaleRoom newRoom, UndertaleData targetData)
+    {
+        int gameObjectCount = 0;
+        int bgSlot = 0;
+
+        // Also clone any legacy tiles that may exist alongside layers
+        CloneLegacyTiles(srcRoom, newRoom, targetData);
+
+        if (srcRoom.Layers is null) return 0;
+
+        foreach (var srcLayer in srcRoom.Layers)
+        {
+            switch (srcLayer.LayerType)
+            {
+                case LayerType.Instances:
+                    if (srcLayer.InstancesData?.Instances is not null)
+                    {
+                        foreach (var srcInst in srcLayer.InstancesData.Instances)
+                        {
+                            if (srcInst is null) continue;
+
+                            var dst = new UndertaleRoom.GameObject
+                            {
+                                X = srcInst.X,
+                                Y = srcInst.Y,
+                                InstanceID = srcInst.InstanceID,
+                                ScaleX = srcInst.ScaleX,
+                                ScaleY = srcInst.ScaleY,
+                                Color = srcInst.Color,
+                                Rotation = srcInst.Rotation,
+                                // GMS1 room instances do not serialize ImageSpeed/ImageIndex.
+                                // Keep deterministic defaults instead of carrying GMS2 editor-only values.
+                                ImageSpeed = 1,
+                                ImageIndex = 0,
+                            };
+
+                            dst.ObjectDefinition = ResolveRequiredGameObject(srcInst.ObjectDefinition, targetData, $"layer '{srcLayer.LayerName?.Content ?? srcLayer.LayerId.ToString()}' instance");
+                            dst.CreationCode = ResolveCode(srcInst.CreationCode, targetData, allowMissing: false);
+                            dst.PreCreateCode = ResolveCode(srcInst.PreCreateCode, targetData, allowMissing: false);
+
+                            newRoom.GameObjects.Add(dst);
+                            gameObjectCount++;
+                        }
+                    }
+                    break;
+
+                case LayerType.Background:
+                    if (srcLayer.BackgroundData is not null)
+                    {
+                        var srcBg = srcLayer.BackgroundData;
+                        var backgroundDefinition =
+                            FindOrCreateBackgroundFromSprite(srcBg.Sprite, targetData);
+
+                        if (backgroundDefinition is null)
+                        {
+                            ApplyBackgroundColorLayer(srcBg, newRoom);
+                            break;
+                        }
+
+                        if (bgSlot >= 8)
+                            break;
+
+                        while (newRoom.Backgrounds.Count <= bgSlot)
+                            newRoom.Backgrounds.Add(new Background());
+
+                        var bg = newRoom.Backgrounds[bgSlot];
+
+                        bg.Enabled = srcBg.Visible;
+                        bg.Foreground = srcBg.Foreground;
+                        bg.TiledHorizontally = srcBg.TiledHorizontally;
+                        bg.TiledVertically = srcBg.TiledVertically;
+                        bg.Stretch = srcBg.Stretch;
+                        bg.X = (int)srcLayer.XOffset;
+                        bg.Y = (int)srcLayer.YOffset;
+                        bg.SpeedX = (int)srcLayer.HSpeed;
+                        bg.SpeedY = (int)srcLayer.VSpeed;
+                        bg.BackgroundDefinition = backgroundDefinition;
+
+                        bgSlot++;
+                    }
+                    break;
+
+                case LayerType.Tiles:
+                    // GMS2 tile layers use tilemaps (TilesX × TilesY grid of uint IDs).
+                    // GMS1 uses individual Tile objects — no direct lossless conversion.
+                    // Skip for now; tiles from legacy Tiles list are already cloned above.
+                    break;
+
+                case LayerType.Assets:
+                    // Assets layer can contain sprite instances and legacy tiles.
+                    // Extract legacy tiles from assets layers into the room's Tiles list.
+                    if (srcLayer.AssetsData?.LegacyTiles is not null)
+                    {
+                        foreach (var src in srcLayer.AssetsData.LegacyTiles)
+                        {
+                            if (src is null) continue;
+                            var dst = new Tile
+                            {
+                                X = src.X,
+                                Y = src.Y,
+                                SourceX = src.SourceX,
+                                SourceY = src.SourceY,
+                                Width = src.Width,
+                                Height = src.Height,
+                                TileDepth = src.TileDepth,
+                                InstanceID = src.InstanceID,
+                                ScaleX = src.ScaleX,
+                                ScaleY = src.ScaleY,
+                                Color = src.Color,
+                            };
+                            dst.BackgroundDefinition =
+                                ResolveBackground(src.BackgroundDefinition, targetData) ??
+                                FindOrCreateBackgroundFromSprite(src.SpriteDefinition, targetData);
+
+                            if (dst.BackgroundDefinition is null)
+                                continue;
+
+                            newRoom.Tiles.Add(dst);
+                        }
+                    }
+                    break;
+
+                default:
+                    // Effect, Path, etc. — no GMS1 equivalent, skip
+                    break;
+            }
+        }
+
+        return gameObjectCount;
+    }
+
+    private static void ApplyBackgroundColorLayer(
+        LayerBackgroundData srcBg, UndertaleRoom newRoom)
+    {
+        if (!srcBg.Visible)
+            return;
+
+        newRoom.DrawBackgroundColor = true;
+        newRoom.BackgroundColor = 0xFF000000 | (srcBg.Color & 0x00FFFFFF);
+        newRoom.Flags |= RoomEntryFlags.ShowColor;
+    }
+
+    /// <summary>
+    /// Try to find a background resource by name (for GMS2→GMS1 sprite→background mapping).
+    /// Returns null-wrapped result for use with ResolveBackground.
+    /// </summary>
+    private static UndertaleBackground? FindBackgroundByName(string name, UndertaleData targetData)
+    {
+        if (targetData.Backgrounds is null) return null;
+        foreach (var bg in targetData.Backgrounds)
+        {
+            if (bg.Name?.Content == name)
+                return bg;
+        }
+        return null;
+    }
+
+    private static UndertaleBackground? FindOrCreateBackgroundFromSprite(
+        UndertaleSprite? srcSprite, UndertaleData targetData)
+    {
+        var spriteName = srcSprite?.Name?.Content;
+        if (spriteName is null || targetData.Backgrounds is null)
+            return null;
+
+        var existing = FindBackgroundByName(spriteName, targetData);
+        if (existing is not null)
+            return existing;
+
+        var targetSprite = ResolveSprite(srcSprite, targetData);
+        var texture = targetSprite?.Textures?.FirstOrDefault()?.Texture;
+        if (texture is null)
+            return null;
+
+        var background = new UndertaleBackground
+        {
+            Name = targetData.Strings.MakeString(spriteName),
+            Transparent = true,
+            Smooth = false,
+            Preload = false,
+            Texture = texture,
+        };
+
+        targetData.Backgrounds.Add(background);
+        return background;
     }
 
     // ── GMS2 Layers ─────────────────────────────────────────────
@@ -671,15 +990,14 @@ public static class RoomTransplanter
             if (code.Name?.Content == name)
                 return code;
         }
-        
-        if (!allowMissing)
+
+        if (allowMissing)
         {
             Console.WriteLine($"WARNING: Code entry {name} not found.");
             return null;
         }
-            throw new ArgumentException($"Code entry '{name}' not found in target.");
-            
-        return null;
+
+        throw new ArgumentException($"Code entry '{name}' not found in target.");
     }
 
     private static UndertaleGameObject? ResolveGameObject(
@@ -694,6 +1012,22 @@ public static class RoomTransplanter
                 return obj;
         }
         return null;
+    }
+
+    private static UndertaleGameObject ResolveRequiredGameObject(
+        UndertaleGameObject? srcObj,
+        UndertaleData targetData,
+        string context)
+    {
+        var name = srcObj?.Name?.Content;
+        if (name is null)
+            throw new ArgumentException($"Missing object reference in {context}.");
+
+        var resolved = ResolveGameObject(srcObj, targetData);
+        if (resolved is null)
+            throw new ArgumentException($"Object '{name}' referenced by {context} was not found in target.");
+
+        return resolved;
     }
 
     private static UndertaleSprite? ResolveSprite(

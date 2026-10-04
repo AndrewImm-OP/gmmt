@@ -245,22 +245,12 @@ public static class ObjectEventPatcher
             EventSubtype = eventSubtype,
         };
 
+        // Only set CodeId — UTMT serialises version-specific
+        // EventAction fields automatically. Hardcoding GMS2 values
+        // (LibID, Kind, ExeType …) breaks GMS1 targets (SIGSEGV).
         var action = new UndertaleGameObject.EventAction
         {
-            LibID = 1,
-            ID = 603,
-            Kind = 7,
-            UseRelative = false,
-            IsQuestion = false,
-            UseApplyTo = true,
-            ExeType = 2,
-            ActionName = targetData.Strings.MakeString(""),
             CodeId = codeEntry,
-            ArgumentCount = 1,
-            Who = -1,
-            Relative = false,
-            IsNot = false,
-            UnknownAlwaysZero = 0,
         };
 
         newEvent.Actions.Add(action);

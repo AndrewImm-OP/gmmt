@@ -1,0 +1,3 @@
+[submodule "extern/UndertaleModTool"]
+	path = extern/UndertaleModTool
+	url = https://github.com/UnderminersTeam/UndertaleModTool.git

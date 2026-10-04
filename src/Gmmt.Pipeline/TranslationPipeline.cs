@@ -1,3 +1,4 @@
+using Gmmt.Core.Classification;
 using Gmmt.Core.Compatibility;
 using Gmmt.Core.Indexing;
 using Gmmt.Core.Loading;
@@ -6,6 +7,7 @@ using Gmmt.Patch;
 using Gmmt.Report;
 using Gmmt.VanillaLibrary;
 using Gmmt.XDelta;
+using System.Linq;
 using UndertaleModLib;
 using UndertaleModLib.Models;
 
@@ -35,6 +37,9 @@ public sealed class TranslateXDeltaOptions
     public bool DryRun { get; init; }
     public bool Force { get; init; }
     public bool Backup { get; init; }
+    public bool SkipDiffPatches { get; init; }
+    /// <summary>If set, write the patch plan JSON to this path (dry-run mode).</summary>
+    public string? PlanPath { get; init; }
 }
 
 /// <summary>
@@ -46,6 +51,10 @@ public sealed class TranslationResult
     public required PatchReport Report { get; init; }
     public string? OutputPath { get; init; }
     public string? ErrorMessage { get; init; }
+    /// <summary>Pre-flight mod classification, if computed.</summary>
+    public ModClassification? Classification { get; init; }
+    /// <summary>Patch plan, populated in --dry-run mode.</summary>
+    public PatchPlan? Plan { get; init; }
 }
 
 /// <summary>
@@ -97,104 +106,19 @@ public sealed class TranslationPipeline
 
             _logger.Log($"Using xdelta3: {XDeltaRunner.GetBinaryPath()}");
 
-            // Find/use vanilla archive
-            string? usedVanillaPath = null;
-            VanillaEntry? usedVanillaEntry = null;
-
+            // Resolve vanilla archive and reconstruct modded via xdelta
             ct.ThrowIfCancellationRequested();
+            var vanillaResolution = ResolveVanillaArchive(options, reportBuilder, ct);
+            if (!vanillaResolution.Success)
+                return Fail(reportBuilder, vanillaResolution.ErrorMessage!, options.ReportPath);
 
-            if (options.VanillaPath is not null)
-            {
-                if (!File.Exists(options.VanillaPath))
-                {
-                    var msg = $"Vanilla archive not found: {options.VanillaPath}";
-                    _logger.LogError(msg);
-                    reportBuilder.AddError("System", "vanilla-missing", msg);
-                    return Fail(reportBuilder, msg, options.ReportPath);
-                }
-
-                tempModdedPath = Path.Combine(Path.GetTempPath(), $"gmmt-modded-{Guid.NewGuid():N}.win");
-                _logger.Log($"Using specified vanilla: {options.VanillaPath}");
-                _logger.Log("Applying xdelta patch...");
-
-                var xdeltaResult = XDeltaRunner.Apply(options.VanillaPath, options.PatchFilePath, tempModdedPath);
-                if (!xdeltaResult.Success)
-                {
-                    CleanupTempFile(tempModdedPath);
-                    tempModdedPath = null;
-
-                    var msg = $"xdelta failed with the specified vanilla archive. stderr: {xdeltaResult.StdErr}";
-                    _logger.LogError(msg);
-                    reportBuilder.AddError("XDelta", "base-mismatch", msg);
-                    return Fail(reportBuilder, msg, options.ReportPath);
-                }
-
-                usedVanillaPath = options.VanillaPath;
-            }
-            else
-            {
-                var library = new VanillaLibraryManager(options.LibraryPath);
-                var candidates = library.GetCandidates().ToList();
-
-                _logger.Log($"Vanilla library: {library.LibraryPath}");
-                _logger.Log($"Found {candidates.Count} candidate(s)");
-
-                if (candidates.Count == 0)
-                {
-                    var msg = "No vanilla archives in library. Add one with vanilla-library add.";
-                    _logger.LogError(msg);
-                    reportBuilder.AddError("System", "vanilla-library-empty", msg);
-                    return Fail(reportBuilder, msg, options.ReportPath);
-                }
-
-                tempModdedPath = Path.Combine(Path.GetTempPath(), $"gmmt-modded-{Guid.NewGuid():N}.win");
-                int candidatesTried = 0;
-
-                foreach (var candidate in candidates)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    var candidatePath = library.GetArchivePath(candidate.Hash);
-                    if (!File.Exists(candidatePath))
-                    {
-                        _logger.Log($"  Skipping {candidate.ShortHash}: archive file missing");
-                        continue;
-                    }
-
-                    candidatesTried++;
-                    _logger.Log($"  Trying {candidate.ShortHash} ({candidate.GameName} {candidate.VersionString})...");
-
-                    var result = XDeltaRunner.Apply(candidatePath, options.PatchFilePath, tempModdedPath);
-                    if (result.Success)
-                    {
-                        _logger.Log($"  Success! Using {candidate.ShortHash}");
-                        usedVanillaPath = candidatePath;
-                        usedVanillaEntry = candidate;
-                        break;
-                    }
-                    else
-                    {
-                        _logger.Log($"    xdelta failed: {Truncate(result.StdErr.Replace('\n', ' '), 80)}");
-                        reportBuilder.AddInfo("XDelta", $"candidate-{candidate.ShortHash}",
-                            $"Candidate rejected: {Truncate(result.StdErr.Replace('\n', ' '), 100)}");
-                        CleanupTempFile(tempModdedPath);
-                    }
-                }
-
-                if (usedVanillaPath is null)
-                {
-                    tempModdedPath = null;
-                    var msg = $"No vanilla archive matched the xdelta patch after trying {candidatesTried} candidate(s).";
-                    _logger.LogError(msg);
-                    reportBuilder.AddError("System", "no-matching-vanilla", msg);
-                    return Fail(reportBuilder, msg, options.ReportPath);
-                }
-            }
+            tempModdedPath = vanillaResolution.TempModdedPath;
+            var usedVanillaPath = vanillaResolution.VanillaPath!;
 
             reportBuilder.VanillaPath = usedVanillaPath;
             reportBuilder.ModdedPath = "(reconstructed from xdelta)";
             reportBuilder.AddInfo("XDelta", "reconstruction",
-                $"Modded archive reconstructed from {(usedVanillaEntry is not null ? usedVanillaEntry.ShortHash : Path.GetFileName(usedVanillaPath))}");
+                $"Modded archive reconstructed from {(vanillaResolution.VanillaEntry is not null ? vanillaResolution.VanillaEntry.ShortHash : Path.GetFileName(usedVanillaPath))}");
 
             // Load archives
             ct.ThrowIfCancellationRequested();
@@ -245,13 +169,138 @@ public sealed class TranslationPipeline
             // Run translation core
             ct.ThrowIfCancellationRequested();
             return RunTranslateCore(vanilla, modded, target, finalOutputPath, reportBuilder,
-                options.ReportPath, options.DryRun, options.Backup, options.Force, ct);
+                options.ReportPath, options.PlanPath, options.DryRun, options.Backup, options.Force,
+                options.SkipDiffPatches, ct);
         }
         finally
         {
             CleanupTempFile(tempModdedPath);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Vanilla archive resolution
+    // ═══════════════════════════════════════════════════════════════
+
+    private sealed class VanillaResolution
+    {
+        public bool Success { get; init; }
+        public string? VanillaPath { get; init; }
+        public string? TempModdedPath { get; init; }
+        public VanillaEntry? VanillaEntry { get; init; }
+        public string? ErrorMessage { get; init; }
+    }
+
+    private VanillaResolution ResolveVanillaArchive(
+        TranslateXDeltaOptions options,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        if (options.VanillaPath is not null)
+            return ResolveExplicitVanilla(options, reportBuilder);
+
+        return ResolveVanillaFromLibrary(options, reportBuilder, ct);
+    }
+
+    private VanillaResolution ResolveExplicitVanilla(
+        TranslateXDeltaOptions options,
+        PatchReportBuilder reportBuilder)
+    {
+        if (!File.Exists(options.VanillaPath))
+        {
+            var msg = $"Vanilla archive not found: {options.VanillaPath}";
+            _logger.LogError(msg);
+            reportBuilder.AddError("System", "vanilla-missing", msg);
+            return new VanillaResolution { Success = false, ErrorMessage = msg };
+        }
+
+        var tempModdedPath = Path.Combine(Path.GetTempPath(), $"gmmt-modded-{Guid.NewGuid():N}.win");
+        _logger.Log($"Using specified vanilla: {options.VanillaPath}");
+        _logger.Log("Applying xdelta patch...");
+
+        var xdeltaResult = XDeltaRunner.Apply(options.VanillaPath, options.PatchFilePath, tempModdedPath);
+        if (!xdeltaResult.Success)
+        {
+            CleanupTempFile(tempModdedPath);
+            var msg = $"xdelta failed with the specified vanilla archive. stderr: {xdeltaResult.StdErr}";
+            _logger.LogError(msg);
+            reportBuilder.AddError("XDelta", "base-mismatch", msg);
+            return new VanillaResolution { Success = false, ErrorMessage = msg };
+        }
+
+        return new VanillaResolution
+        {
+            Success = true,
+            VanillaPath = options.VanillaPath,
+            TempModdedPath = tempModdedPath
+        };
+    }
+
+    private VanillaResolution ResolveVanillaFromLibrary(
+        TranslateXDeltaOptions options,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        var library = new VanillaLibraryManager(options.LibraryPath);
+        var candidates = library.GetCandidates().ToList();
+
+        _logger.Log($"Vanilla library: {library.LibraryPath}");
+        _logger.Log($"Found {candidates.Count} candidate(s)");
+
+        if (candidates.Count == 0)
+        {
+            var msg = "No vanilla archives in library. Add one with vanilla-library add.";
+            _logger.LogError(msg);
+            reportBuilder.AddError("System", "vanilla-library-empty", msg);
+            return new VanillaResolution { Success = false, ErrorMessage = msg };
+        }
+
+        var tempModdedPath = Path.Combine(Path.GetTempPath(), $"gmmt-modded-{Guid.NewGuid():N}.win");
+        int candidatesTried = 0;
+
+        foreach (var candidate in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var candidatePath = library.GetArchivePath(candidate.Hash);
+            if (!File.Exists(candidatePath))
+            {
+                _logger.Log($"  Skipping {candidate.ShortHash}: archive file missing");
+                continue;
+            }
+
+            candidatesTried++;
+            _logger.Log($"  Trying {candidate.ShortHash} ({candidate.GameName} {candidate.VersionString})...");
+
+            var result = XDeltaRunner.Apply(candidatePath, options.PatchFilePath, tempModdedPath);
+            if (result.Success)
+            {
+                _logger.Log($"  Success! Using {candidate.ShortHash}");
+                return new VanillaResolution
+                {
+                    Success = true,
+                    VanillaPath = candidatePath,
+                    TempModdedPath = tempModdedPath,
+                    VanillaEntry = candidate
+                };
+            }
+
+            _logger.Log($"    xdelta failed: {Truncate(result.StdErr.Replace('\n', ' '), 80)}");
+            reportBuilder.AddInfo("XDelta", $"candidate-{candidate.ShortHash}",
+                $"Candidate rejected: {Truncate(result.StdErr.Replace('\n', ' '), 100)}");
+            CleanupTempFile(tempModdedPath);
+        }
+
+        CleanupTempFile(tempModdedPath);
+        var msg2 = $"No vanilla archive matched the xdelta patch after trying {candidatesTried} candidate(s).";
+        _logger.LogError(msg2);
+        reportBuilder.AddError("System", "no-matching-vanilla", msg2);
+        return new VanillaResolution { Success = false, ErrorMessage = msg2 };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Translation core
+    // ═══════════════════════════════════════════════════════════════
 
     private TranslationResult RunTranslateCore(
         ArchiveLoader.LoadResult vanilla,
@@ -260,9 +309,11 @@ public sealed class TranslationPipeline
         string outputPath,
         PatchReportBuilder reportBuilder,
         string? reportPath,
+        string? planPath,
         bool dryRun,
         bool backup,
         bool force,
+        bool skipDiffPatches,
         CancellationToken ct)
     {
         _logger.Log("Building name indices...");
@@ -273,9 +324,302 @@ public sealed class TranslationPipeline
         ct.ThrowIfCancellationRequested();
 
         // ─────────────────────────────────────────────────────────
-         // Phase 0: Transplant new resources from modded → target
-        // Order matters: sprites → sounds → backgrounds → fonts → code → scripts → objects → rooms
+        // Phase -1: Pre-flight mod classification
         // ─────────────────────────────────────────────────────────
+        _logger.Log("Running pre-flight mod classification...");
+        var classification = ModClassifier.Classify(
+            vanilla.Metadata, modded.Metadata, target.Metadata,
+            vanillaIdx, moddedIdx, targetIdx,
+            CompatChecker.CheckTranslate(vanilla.Metadata, modded.Metadata, target.Metadata));
+
+        LogClassification(classification);
+        reportBuilder.AddInfo("Classification", "verdict", classification.Summary);
+
+        foreach (var issue in classification.Issues)
+        {
+            if (issue.Severity == ClassificationSeverity.Blocker)
+                reportBuilder.AddError("Classification", issue.Code, issue.Message);
+            else if (issue.Severity == ClassificationSeverity.Major)
+                reportBuilder.AddRisky("Classification", issue.Code, issue.Message);
+            else if (issue.Severity == ClassificationSeverity.Minor)
+                reportBuilder.AddInfo("Classification", issue.Code, issue.Message);
+        }
+
+        if (classification.ShouldAbort && !force)
+        {
+            var msg = $"Pre-flight classification: {classification.Verdict}. " +
+                      "Automatic translation will produce broken output. Use --force to override.";
+            _logger.LogError(msg);
+            return Fail(reportBuilder, msg, reportPath);
+        }
+
+        if (classification.Verdict == PortabilityVerdict.NotPortable && force)
+        {
+            _logger.LogWarning("⚠ Proceeding despite NotPortable verdict (--force). Output will likely be broken.");
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        // ─────────────────────────────────────────────────────────
+        // Dry-run: compute plan without patching
+        // ─────────────────────────────────────────────────────────
+        if (dryRun)
+        {
+            return BuildDryRunResult(vanilla, modded, target, vanillaIdx, moddedIdx,
+                classification, reportBuilder, reportPath, planPath, ct);
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // Phase 0: Transplant new resources from modded → target
+        // ─────────────────────────────────────────────────────────
+        targetIdx = TransplantResources(modded, target, vanillaIdx, moddedIdx, targetIdx, reportBuilder, ct);
+
+        // ─────────────────────────────────────────────────────────
+        // Phase 0b: Patch event bindings on existing objects
+        // ─────────────────────────────────────────────────────────
+        PatchEventBindings(vanillaIdx, moddedIdx, target.Data, reportBuilder, ct);
+
+        // ─────────────────────────────────────────────────────────
+        // Phase 1: Compute diffs and apply patches for shared resources
+        // ─────────────────────────────────────────────────────────
+        // Phase 1a: Bytecode replacement for modified code entries
+        // (lighter than full diff patches — only needs code diffs, not string diffs)
+        {
+            ct.ThrowIfCancellationRequested();
+            _logger.Log("Computing code diffs for bytecode replacement...");
+            var codeDiffs = CodeDiffer.DiffAll(vanillaIdx, moddedIdx);
+            var bytecodeReplaceNames = new List<string>();
+            foreach (var diff in codeDiffs)
+            {
+                if (diff.Status != CodeDiffStatus.Modified) continue;
+                bool hasNonString = false;
+                foreach (var d in diff.Differences)
+                {
+                    bool isStringOnly = d.Vanilla is not null && d.Modded is not null &&
+                        d.Vanilla.Kind == d.Modded.Kind && d.Vanilla.StringValue != d.Modded.StringValue;
+                    if (!isStringOnly) { hasNonString = true; break; }
+                }
+                if (hasNonString) bytecodeReplaceNames.Add(diff.CodeEntryName);
+            }
+
+            var skipBytecodeReplace = Environment.GetEnvironmentVariable("GMMT_SKIP_BYTECODE_REPLACE") == "1";
+
+            // GMMT_REPLACE_EXCLUDE=name1,name2,... — exclude specific entries from bytecode replacement
+            // Useful when modded bytecode for an init script (e.g. SCR_GAMESTART) breaks game logic
+            // and we want to keep vanilla bytecode while still applying replace to everything else.
+            var excludeEnv = Environment.GetEnvironmentVariable("GMMT_REPLACE_EXCLUDE");
+            var excludeSet = new HashSet<string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(excludeEnv))
+            {
+                foreach (var name in excludeEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    excludeSet.Add(name);
+            }
+
+            // GMMT_REPLACE_LIMIT=N — replace only the first N entries (for bisecting which replace breaks the game).
+            int replaceLimit = int.MaxValue;
+            var limitEnv = Environment.GetEnvironmentVariable("GMMT_REPLACE_LIMIT");
+            if (!string.IsNullOrWhiteSpace(limitEnv) && int.TryParse(limitEnv, out var parsedLimit))
+                replaceLimit = parsedLimit;
+
+            if (excludeSet.Count > 0)
+            {
+                int beforeCount = bytecodeReplaceNames.Count;
+                bytecodeReplaceNames = bytecodeReplaceNames.Where(n => !excludeSet.Contains(n)).ToList();
+                int excluded = beforeCount - bytecodeReplaceNames.Count;
+                if (excluded > 0)
+                    _logger.Log($"Excluding {excluded} entries from bytecode replacement (GMMT_REPLACE_EXCLUDE).");
+            }
+
+            if (replaceLimit < bytecodeReplaceNames.Count)
+            {
+                _logger.Log($"Limiting bytecode replacement to first {replaceLimit} entries (GMMT_REPLACE_LIMIT={replaceLimit}).");
+                bytecodeReplaceNames = bytecodeReplaceNames.Take(replaceLimit).ToList();
+            }
+
+            if (bytecodeReplaceNames.Count > 0 && !skipBytecodeReplace)
+            {
+                _logger.Log($"Replacing bytecode for {bytecodeReplaceNames.Count} modified code entries...");
+                var replaceResults = CodeTransplanter.ReplaceExistingBytecode(
+                    bytecodeReplaceNames, modded.Data, target.Data);
+                int replOk = 0, replFail = 0, replUnsup = 0;
+                foreach (var r in replaceResults)
+                {
+                    switch (r.Status)
+                    {
+                        case CodeTransplantStatus.Transplanted: replOk++; break;
+                        case CodeTransplantStatus.Unsupported:
+                            replUnsup++;
+                            reportBuilder.AddRisky("CodeReplace", r.CodeName,
+                                $"Bytecode replacement unsupported: {r.Diagnostic}");
+                            break;
+                        default:
+                            replFail++;
+                            reportBuilder.AddRisky("CodeReplace", r.CodeName,
+                                $"Bytecode replacement failed: {r.Diagnostic}");
+                            break;
+                    }
+                }
+                _logger.Log($"  Bytecode replacement: {replOk} ok, {replUnsup} unsupported, {replFail} failed");
+            }
+            else if (bytecodeReplaceNames.Count > 0)
+            {
+                _logger.Log($"Skipping bytecode replacement for {bytecodeReplaceNames.Count} entries (GMMT_SKIP_BYTECODE_REPLACE=1).");
+            }
+        }
+
+        if (skipDiffPatches)
+        {
+            _logger.Log("Skipping diff patches (--skip-diff-patches).");
+            reportBuilder.AddInfo("Pipeline", "skip-diff-patches",
+                "Shared-resource diff patches were skipped for this run.");
+        }
+        else
+        {
+            ApplyDiffPatches(vanilla, modded, target, vanillaIdx, moddedIdx, targetIdx, reportBuilder, ct);
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // Phase 2: Write output
+        // ─────────────────────────────────────────────────────────
+        return WriteOutput(target, outputPath, reportBuilder, reportPath, dryRun, backup, ct);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Dry-run: build plan without patching
+    // ═══════════════════════════════════════════════════════════════
+
+    private TranslationResult BuildDryRunResult(
+        ArchiveLoader.LoadResult vanilla,
+        ArchiveLoader.LoadResult modded,
+        ArchiveLoader.LoadResult target,
+        NameIndex vanillaIdx,
+        NameIndex moddedIdx,
+        ModClassification classification,
+        PatchReportBuilder reportBuilder,
+        string? reportPath,
+        string? planPath,
+        CancellationToken ct)
+    {
+        _logger.Log("DRY RUN — computing plan without patching...");
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Computing transplant manifest...");
+        var manifest = ResourceTransplantDiffer.ComputeManifest(vanillaIdx, moddedIdx);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Computing code diffs...");
+        var codeDiffs = CodeDiffer.DiffAll(vanillaIdx, moddedIdx);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Computing string diffs...");
+        var stringDiffs = StringDiffAlgorithm.DiffAll(vanillaIdx, moddedIdx);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Computing object diffs...");
+        var objectDiffs = ObjectDiffer.DiffAll(vanillaIdx, moddedIdx);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Building patch plan...");
+        bool targetIsGms1 = !target.Metadata.IsGMS2;
+        var plan = PatchPlanBuilder.Build(
+            classification, manifest, codeDiffs, stringDiffs, objectDiffs,
+            moddedIdx, target.Data, targetIsGms1);
+
+        // Log plan summary
+        _logger.Log("");
+        _logger.Log("═══════════════════════════════════════════════════════════");
+        _logger.Log($"  PATCH PLAN (dry run)");
+        _logger.Log($"  Actions: {plan.ActionCount} ({plan.HighConfidenceCount} high, {plan.MediumConfidenceCount} medium, {plan.LowConfidenceCount} low confidence)");
+        _logger.Log($"  Skipped: {plan.SkipCount}");
+        _logger.Log($"  Code replacements: {plan.CodeReplaceCount}");
+        _logger.Log($"  String patches: {plan.StringPatchCount}");
+        _logger.Log($"  Transplants: {plan.TransplantCount}");
+        _logger.Log($"  Updates: {plan.UpdateCount}");
+        _logger.Log("═══════════════════════════════════════════════════════════");
+
+        // Write plan JSON if path specified
+        if (planPath is not null)
+        {
+            WritePlanJson(plan, planPath);
+            _logger.Log($"Plan JSON written to: {planPath}");
+        }
+
+        // Also write report if requested
+        if (reportPath is not null)
+        {
+            var report = reportBuilder.Build();
+            ReportJsonWriter.WriteToFile(report, reportPath);
+            _logger.Log($"Report written to: {reportPath}");
+        }
+
+        _logger.Log("\nDry run complete. No files were modified.");
+
+        return new TranslationResult
+        {
+            Success = true,
+            Report = reportBuilder.Build(),
+            Classification = classification,
+            Plan = plan,
+        };
+    }
+
+    private static void WritePlanJson(PatchPlan plan, string path)
+    {
+        var obj = new
+        {
+            classification = new
+            {
+                verdict = plan.Classification.Verdict.ToString(),
+                estimatedSuccessPercent = plan.Classification.EstimatedSuccessPercent,
+                summary = plan.Classification.Summary,
+            },
+            summary = new
+            {
+                totalActions = plan.ActionCount,
+                totalSkipped = plan.SkipCount,
+                highConfidence = plan.HighConfidenceCount,
+                mediumConfidence = plan.MediumConfidenceCount,
+                lowConfidence = plan.LowConfidenceCount,
+                codeReplacements = plan.CodeReplaceCount,
+                stringPatches = plan.StringPatchCount,
+                transplants = plan.TransplantCount,
+                updates = plan.UpdateCount,
+            },
+            actions = plan.Actions.Select(a => new
+            {
+                kind = a.Kind.ToString(),
+                resource = a.Resource,
+                confidence = a.Confidence.ToString(),
+                description = a.Description,
+                detail = a.Detail,
+            }).ToArray(),
+            skipped = plan.Skipped.Select(s => new
+            {
+                kind = s.Kind.ToString(),
+                resource = s.Resource,
+                reason = s.Reason,
+                detail = s.Detail,
+            }).ToArray(),
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(obj,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(path, json);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Phase 0: Resource transplantation
+    // ═══════════════════════════════════════════════════════════════
+
+    private NameIndex TransplantResources(
+        ArchiveLoader.LoadResult modded,
+        ArchiveLoader.LoadResult target,
+        NameIndex vanillaIdx,
+        NameIndex moddedIdx,
+        NameIndex targetIdx,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
         _logger.Log("Computing transplant manifest...");
         var manifest = ResourceTransplantDiffer.ComputeManifest(vanillaIdx, moddedIdx);
         _logger.Log(
@@ -288,508 +632,495 @@ public sealed class TranslationPipeline
             $"backgrounds={manifest.ModifiedBackgrounds.Count}, " +
             $"fonts={manifest.ModifiedFonts.Count}, sounds={manifest.ModifiedSounds.Count}");
 
-        bool hasTransplantWork = true;
-        // bool hasTransplantWork = manifest.TotalNewResources > 0 ||
-        //     manifest.ModifiedSprites.Count > 0 ||
-        //     manifest.ModifiedBackgrounds.Count > 0 ||
-        //     manifest.ModifiedFonts.Count > 0 ||
-        //     manifest.ModifiedSounds.Count > 0;
+        bool hasTransplantWork = manifest.TotalNewResources > 0 ||
+            manifest.ModifiedSprites.Count > 0 ||
+            manifest.ModifiedBackgrounds.Count > 0 ||
+            manifest.ModifiedFonts.Count > 0 ||
+            manifest.ModifiedSounds.Count > 0;
 
-        if (hasTransplantWork)
+        if (!hasTransplantWork)
+            return targetIdx;
+
+        // Shared texture clone maps for sprites, fonts, and backgrounds
+        var textureCloneMap = new Dictionary<int, UndertaleEmbeddedTexture>();
+        var tpagCloneMap = new Dictionary<UndertaleTexturePageItem, UndertaleTexturePageItem>(
+            ReferenceEqualityComparer.Instance);
+
+        // ── 1. Transplant sprites (with textures and TPAG items) ──
+        TransplantAndReport(manifest.NewSprites, "Sprite", "sprites",
+            names => SpriteTransplanter.TransplantAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == SpriteTransplantStatus.Transplanted,
+            r => r.Status == SpriteTransplantStatus.AlreadyExists,
+            r => r.Status == SpriteTransplantStatus.Failed,
+            r => r.SpriteName,
+            r => r.Diagnostic,
+            r => r.Status == SpriteTransplantStatus.Transplanted ? $"Transplanted ({r.FrameCount} frames)" : null,
+            reportBuilder, ct);
+
+        // ── 1b. Update modified sprites ──
+        UpdateAndReport(manifest.ModifiedSprites, "Sprite", "sprites",
+            names => SpriteTransplanter.UpdateAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == SpriteUpdateStatus.Updated,
+            r => r.Status == SpriteUpdateStatus.Failed,
+            r => r.SpriteName,
+            r => r.Diagnostic,
+            r => r.Status == SpriteUpdateStatus.Updated ? $"Updated ({r.FrameCount} frames)" : null,
+            reportBuilder, ct);
+
+        // ── 2. Transplant sounds ──
+        TransplantAndReport(manifest.NewSounds, "Sound", "sounds",
+            names => SoundTransplanter.TransplantAll(names, moddedIdx, target.Data),
+            r => r.Status == SoundTransplantStatus.Transplanted,
+            r => r.Status == SoundTransplantStatus.AlreadyExists,
+            r => r.Status == SoundTransplantStatus.Failed,
+            r => r.SoundName,
+            r => r.Diagnostic,
+            r => null,
+            reportBuilder, ct);
+
+        // ── 2b. Update modified sounds ──
+        UpdateAndReport(manifest.ModifiedSounds, "Sound", "sounds",
+            names => SoundTransplanter.UpdateAll(names, moddedIdx, target.Data),
+            r => r.Status == SoundUpdateStatus.Updated,
+            r => r.Status == SoundUpdateStatus.Failed,
+            r => r.SoundName,
+            r => r.Diagnostic,
+            r => null,
+            reportBuilder, ct);
+
+        // ── 3. Transplant backgrounds (tilesets) ──
+        TransplantAndReport(manifest.NewBackgrounds, "Background", "backgrounds",
+            names => BackgroundTransplanter.TransplantAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == BackgroundTransplantStatus.Transplanted,
+            r => r.Status == BackgroundTransplantStatus.AlreadyExists,
+            r => r.Status == BackgroundTransplantStatus.Failed,
+            r => r.BackgroundName,
+            r => r.Diagnostic,
+            r => null,
+            reportBuilder, ct);
+
+        // ── 3b. Update modified backgrounds ──
+        UpdateAndReport(manifest.ModifiedBackgrounds, "Background", "backgrounds",
+            names => BackgroundTransplanter.UpdateAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == BackgroundUpdateStatus.Updated,
+            r => r.Status == BackgroundUpdateStatus.Failed,
+            r => r.BackgroundName,
+            r => r.Diagnostic,
+            r => null,
+            reportBuilder, ct);
+
+        // ── 4. Transplant fonts ──
+        TransplantAndReport(manifest.NewFonts, "Font", "fonts",
+            names => FontTransplanter.TransplantAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == FontTransplantStatus.Transplanted,
+            r => r.Status == FontTransplantStatus.AlreadyExists,
+            r => r.Status == FontTransplantStatus.Failed,
+            r => r.FontName,
+            r => r.Diagnostic,
+            r => r.Status == FontTransplantStatus.Transplanted ? $"Transplanted ({r.GlyphCount} glyphs)" : null,
+            reportBuilder, ct);
+
+        // ── 4b. Update modified fonts ──
+        UpdateAndReport(manifest.ModifiedFonts, "Font", "fonts",
+            names => FontTransplanter.UpdateAll(names, moddedIdx, target.Data, textureCloneMap, tpagCloneMap),
+            r => r.Status == FontUpdateStatus.Updated,
+            r => r.Status == FontUpdateStatus.Failed,
+            r => r.FontName,
+            r => r.Diagnostic,
+            r => r.Status == FontUpdateStatus.Updated ? $"Updated ({r.GlyphCount} glyphs)" : null,
+            reportBuilder, ct);
+
+        // ── Diagnostic: texture transplant summary ──
+        if (textureCloneMap.Count > 0)
+            RunTextureDiagnostics(target.Data, modded.Data, textureCloneMap);
+
+        // ── 5. Transplant code entries ──
+        TransplantCodeEntries(manifest.NewCodeEntries, moddedIdx, target.Data, reportBuilder, ct);
+
+        // ── 6. Transplant scripts ──
+        TransplantAndReport(manifest.NewScripts, "Script", "scripts",
+            names => ScriptTransplanter.TransplantAll(names, moddedIdx, target.Data),
+            r => r.Status == ScriptTransplantStatus.Transplanted,
+            r => r.Status == ScriptTransplantStatus.AlreadyExists,
+            r => r.Status == ScriptTransplantStatus.Failed,
+            r => r.ScriptName,
+            r => r.Diagnostic,
+            r => null,
+            reportBuilder, ct);
+
+        // ── 7. Transplant game objects ──
+        TransplantAndReport(manifest.NewObjects, "Object", "game objects",
+            names => GameObjectTransplanter.TransplantAll(names, moddedIdx, target.Data),
+            r => r.Status == GameObjectTransplantStatus.Transplanted,
+            r => r.Status == GameObjectTransplantStatus.AlreadyExists,
+            r => r.Status == GameObjectTransplantStatus.Failed,
+            r => r.ObjectName,
+            r => r.Diagnostic,
+            r => r.Status == GameObjectTransplantStatus.Transplanted
+                ? $"Transplanted ({r.EventCount} actions" +
+                  (r.SkippedActionCount > 0 ? $", skipped {r.SkippedActionCount}" : "") + ")"
+                : null,
+            reportBuilder, ct);
+
+        // ── 8. Transplant rooms (depends on all above) ──
+        TransplantRooms(manifest.NewRooms, moddedIdx, target.Data, reportBuilder, ct);
+
+        // Rebuild target name index after transplants (new resources were added)
+        ct.ThrowIfCancellationRequested();
+        _logger.Log("Rebuilding target name index after transplants...");
+        return NameIndex.Build(target.Data);
+    }
+
+    /// <summary>
+    /// Generic transplant reporting: runs the transplant operation and reports results.
+    /// Eliminates the repeated switch/case blocks for each resource type.
+    /// </summary>
+    private void TransplantAndReport<TResult>(
+        IReadOnlyList<string> names,
+        string resourceType,
+        string displayName,
+        Func<IReadOnlyList<string>, IReadOnlyList<TResult>> transplantFunc,
+        Func<TResult, bool> isTransplanted,
+        Func<TResult, bool> isAlreadyExists,
+        Func<TResult, bool> isFailed,
+        Func<TResult, string> getName,
+        Func<TResult, string?> getDiagnostic,
+        Func<TResult, string?> getSuccessDetail,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        if (names.Count == 0) return;
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Transplanting {names.Count} {displayName}...");
+        var results = transplantFunc(names);
+
+        int transplanted = 0, failed = 0;
+        foreach (var r in results)
         {
-            // Shared texture clone maps for sprites, fonts, and backgrounds
-            var textureCloneMap = new Dictionary<int, UndertaleEmbeddedTexture>();
-            var tpagCloneMap = new Dictionary<UndertaleTexturePageItem, UndertaleTexturePageItem>(
-                ReferenceEqualityComparer.Instance);
+            var name = getName(r);
+            var diagnostic = getDiagnostic(r);
 
-            // ── 1. Transplant sprites (with textures and TPAG items) ──
-            if (false && manifest.NewSprites.Count > 0)
+            if (isTransplanted(r))
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewSprites.Count} sprites...");
-                var spriteResults = SpriteTransplanter.TransplantAll(
-                    manifest.NewSprites, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                foreach (var r in spriteResults)
-                {
-                    switch (r.Status)
-                    {
-                        case SpriteTransplantStatus.Transplanted:
-                            reportBuilder.AddApplied("Sprite", r.SpriteName,
-                                $"Transplanted ({r.FrameCount} frames)",
-                                null, ReportConfidence.High);
-                            break;
-                        case SpriteTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Sprite", r.SpriteName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case SpriteTransplantStatus.Failed:
-                            reportBuilder.AddError("Sprite", r.SpriteName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Sprite", r.SpriteName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
+                transplanted++;
+                reportBuilder.AddApplied(resourceType, name,
+                    getSuccessDetail(r) ?? "Transplanted", null, ReportConfidence.High);
             }
-
-            // ── 1b. Update modified sprites (existing in both vanilla and modded) ──
-            if (false && manifest.ModifiedSprites.Count > 0)
+            else if (isAlreadyExists(r))
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Updating {manifest.ModifiedSprites.Count} modified sprites...");
-                var updateResults = SpriteTransplanter.UpdateAll(
-                    manifest.ModifiedSprites, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                int updated = 0, failed = 0;
-                foreach (var r in updateResults)
-                {
-                    switch (r.Status)
-                    {
-                        case SpriteUpdateStatus.Updated:
-                            updated++;
-                            reportBuilder.AddApplied("Sprite", r.SpriteName,
-                                $"Updated ({r.FrameCount} frames)",
-                                null, ReportConfidence.High);
-                            break;
-                        case SpriteUpdateStatus.TargetNotFound:
-                            reportBuilder.AddSkipped("Sprite", r.SpriteName,
-                                "Not found in target archive", r.Diagnostic);
-                            break;
-                        case SpriteUpdateStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Sprite", r.SpriteName,
-                                r.Diagnostic ?? "Update failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Sprite", r.SpriteName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Sprite update: {updated} ok, {failed} failed");
+                reportBuilder.AddSkipped(resourceType, name,
+                    "Already exists in target", diagnostic);
             }
-
-            // ── 2. Transplant sounds ──
-            if (false && manifest.NewSounds.Count > 0)
+            else if (isFailed(r))
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewSounds.Count} sounds...");
-                var soundResults = SoundTransplanter.TransplantAll(
-                    manifest.NewSounds, moddedIdx, target.Data);
-
-                int transplanted = 0, failed = 0;
-                foreach (var r in soundResults)
-                {
-                    switch (r.Status)
-                    {
-                        case SoundTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Sound", r.SoundName,
-                                "Transplanted", null, ReportConfidence.High);
-                            break;
-                        case SoundTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Sound", r.SoundName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case SoundTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Sound", r.SoundName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Sound", r.SoundName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Sound transplant: {transplanted} ok, {failed} failed");
+                failed++;
+                reportBuilder.AddError(resourceType, name,
+                    diagnostic ?? "Transplant failed");
             }
-
-            // ── 2b. Update modified sounds ──
-            if (false && manifest.ModifiedSounds.Count > 0)
+            else
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Updating {manifest.ModifiedSounds.Count} modified sounds...");
-                var updateResults = SoundTransplanter.UpdateAll(
-                    manifest.ModifiedSounds, moddedIdx, target.Data);
-
-                int updated = 0, failed = 0;
-                foreach (var r in updateResults)
-                {
-                    switch (r.Status)
-                    {
-                        case SoundUpdateStatus.Updated:
-                            updated++;
-                            reportBuilder.AddApplied("Sound", r.SoundName,
-                                "Updated", null, ReportConfidence.High);
-                            break;
-                        case SoundUpdateStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Sound", r.SoundName,
-                                r.Diagnostic ?? "Update failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Sound", r.SoundName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Sound update: {updated} ok, {failed} failed");
+                reportBuilder.AddSkipped(resourceType, name,
+                    diagnostic ?? $"Status: unknown");
             }
+        }
+        _logger.Log($"  {resourceType} transplant: {transplanted} ok, {failed} failed");
+    }
 
-            // ── 3. Transplant backgrounds (tilesets) ──
-            if (false && manifest.NewBackgrounds.Count > 0)
+    /// <summary>
+    /// Generic update reporting: runs the update operation and reports results.
+    /// </summary>
+    private void UpdateAndReport<TResult>(
+        IReadOnlyList<string> names,
+        string resourceType,
+        string displayName,
+        Func<IReadOnlyList<string>, IReadOnlyList<TResult>> updateFunc,
+        Func<TResult, bool> isUpdated,
+        Func<TResult, bool> isFailed,
+        Func<TResult, string> getName,
+        Func<TResult, string?> getDiagnostic,
+        Func<TResult, string?> getSuccessDetail,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        if (names.Count == 0) return;
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Updating {names.Count} modified {displayName}...");
+        var results = updateFunc(names);
+
+        int updated = 0, failed = 0;
+        foreach (var r in results)
+        {
+            var name = getName(r);
+            var diagnostic = getDiagnostic(r);
+
+            if (isUpdated(r))
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewBackgrounds.Count} backgrounds...");
-                var bgResults = BackgroundTransplanter.TransplantAll(
-                    manifest.NewBackgrounds, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                int transplanted = 0, failed = 0;
-                foreach (var r in bgResults)
-                {
-                    switch (r.Status)
-                    {
-                        case BackgroundTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Background", r.BackgroundName,
-                                "Transplanted", null, ReportConfidence.High);
-                            break;
-                        case BackgroundTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Background", r.BackgroundName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case BackgroundTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Background", r.BackgroundName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Background", r.BackgroundName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Background transplant: {transplanted} ok, {failed} failed");
+                updated++;
+                reportBuilder.AddApplied(resourceType, name,
+                    getSuccessDetail(r) ?? "Updated", null, ReportConfidence.High);
             }
-
-            // ── 3b. Update modified backgrounds ──
-            if (false && manifest.ModifiedBackgrounds.Count > 0)
+            else if (isFailed(r))
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Updating {manifest.ModifiedBackgrounds.Count} modified backgrounds...");
-                var updateResults = BackgroundTransplanter.UpdateAll(
-                    manifest.ModifiedBackgrounds, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                int updated = 0, failed = 0;
-                foreach (var r in updateResults)
-                {
-                    switch (r.Status)
-                    {
-                        case BackgroundUpdateStatus.Updated:
-                            updated++;
-                            reportBuilder.AddApplied("Background", r.BackgroundName,
-                                "Updated", null, ReportConfidence.High);
-                            break;
-                        case BackgroundUpdateStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Background", r.BackgroundName,
-                                r.Diagnostic ?? "Update failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Background", r.BackgroundName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Background update: {updated} ok, {failed} failed");
+                failed++;
+                reportBuilder.AddError(resourceType, name,
+                    diagnostic ?? "Update failed");
             }
-
-            // ── 4. Transplant fonts ──
-            if (false && manifest.NewFonts.Count > 0)
+            else
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewFonts.Count} fonts...");
-                var fontResults = FontTransplanter.TransplantAll(
-                    manifest.NewFonts, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                int transplanted = 0, failed = 0;
-                foreach (var r in fontResults)
-                {
-                    switch (r.Status)
-                    {
-                        case FontTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Font", r.FontName,
-                                $"Transplanted ({r.GlyphCount} glyphs)",
-                                null, ReportConfidence.High);
-                            break;
-                        case FontTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Font", r.FontName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case FontTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Font", r.FontName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Font", r.FontName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Font transplant: {transplanted} ok, {failed} failed");
+                reportBuilder.AddSkipped(resourceType, name,
+                    diagnostic ?? $"Status: unknown");
             }
+        }
+        _logger.Log($"  {resourceType} update: {updated} ok, {failed} failed");
+    }
 
-            // ── 4b. Update modified fonts ──
-            if (false && manifest.ModifiedFonts.Count > 0)
+    /// <summary>
+    /// Code entries have an extra "Unsupported" status, so they use a dedicated method.
+    /// </summary>
+    private void TransplantCodeEntries(
+        IReadOnlyList<string> names,
+        NameIndex moddedIdx,
+        UndertaleData targetData,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        if (names.Count == 0) return;
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Transplanting {names.Count} code entries...");
+        var results = CodeTransplanter.TransplantAll(names, moddedIdx, targetData);
+
+        int transplanted = 0, unsupported = 0, failed = 0;
+        foreach (var r in results)
+        {
+            switch (r.Status)
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Updating {manifest.ModifiedFonts.Count} modified fonts...");
-                var updateResults = FontTransplanter.UpdateAll(
-                    manifest.ModifiedFonts, moddedIdx, target.Data,
-                    textureCloneMap, tpagCloneMap);
-
-                int updated = 0, failed = 0;
-                foreach (var r in updateResults)
-                {
-                    switch (r.Status)
-                    {
-                        case FontUpdateStatus.Updated:
-                            updated++;
-                            reportBuilder.AddApplied("Font", r.FontName,
-                                $"Updated ({r.GlyphCount} glyphs)", null, ReportConfidence.High);
-                            break;
-                        case FontUpdateStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Font", r.FontName,
-                                r.Diagnostic ?? "Update failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Font", r.FontName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Font update: {updated} ok, {failed} failed");
+                case CodeTransplantStatus.Transplanted:
+                    transplanted++;
+                    reportBuilder.AddApplied("Code", r.CodeName,
+                        $"Transplanted ({r.InstructionCount} instructions)",
+                        null, ReportConfidence.High);
+                    break;
+                case CodeTransplantStatus.AlreadyExists:
+                    reportBuilder.AddSkipped("Code", r.CodeName,
+                        "Already exists in target", r.Diagnostic);
+                    break;
+                case CodeTransplantStatus.Unsupported:
+                    unsupported++;
+                    reportBuilder.AddUnsupported("Code", r.CodeName,
+                        r.Diagnostic ?? "Unsupported for transplant");
+                    break;
+                case CodeTransplantStatus.Failed:
+                    failed++;
+                    reportBuilder.AddError("Code", r.CodeName,
+                        r.Diagnostic ?? "Transplant failed");
+                    break;
+                default:
+                    reportBuilder.AddSkipped("Code", r.CodeName,
+                        r.Diagnostic ?? $"Status: {r.Status}");
+                    break;
             }
+        }
+        _logger.Log($"  Code transplant: {transplanted} ok, {unsupported} unsupported, {failed} failed");
+    }
 
-            // ── 5. Transplant code entries ──
-            if (false && manifest.NewCodeEntries.Count > 0)
+    /// <summary>
+    /// Rooms have a special logging rule (only first 3 failures logged as warnings).
+    /// </summary>
+    private void TransplantRooms(
+        IReadOnlyList<string> names,
+        NameIndex moddedIdx,
+        UndertaleData targetData,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
+        if (names.Count == 0) return;
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Transplanting {names.Count} rooms...");
+        var results = RoomTransplanter.TransplantAll(names, moddedIdx, targetData);
+
+        int transplanted = 0, failed = 0;
+        foreach (var r in results)
+        {
+            switch (r.Status)
             {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewCodeEntries.Count} code entries...");
-                var codeTransplantResults = CodeTransplanter.TransplantAll(
-                    manifest.NewCodeEntries, moddedIdx, target.Data);
-
-                int transplanted = 0, unsupported = 0, failed = 0;
-                foreach (var r in codeTransplantResults)
-                {
-                    switch (r.Status)
-                    {
-                        case CodeTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Code", r.CodeName,
-                                $"Transplanted ({r.InstructionCount} instructions)",
-                                null, ReportConfidence.High);
-                            break;
-                        case CodeTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Code", r.CodeName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case CodeTransplantStatus.Unsupported:
-                            unsupported++;
-                            reportBuilder.AddUnsupported("Code", r.CodeName,
-                                r.Diagnostic ?? "Unsupported for transplant");
-                            break;
-                        case CodeTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Code", r.CodeName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Code", r.CodeName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Code transplant: {transplanted} ok, {unsupported} unsupported, {failed} failed");
+                case RoomTransplantStatus.Transplanted:
+                    transplanted++;
+                    reportBuilder.AddApplied("Room", r.RoomName,
+                        $"Transplanted ({r.LayerCount} layers, {r.GameObjectCount} instances, " +
+                        $"roomOrder={(r.AddedToRoomOrder ? "added" : "existing")}, " +
+                        $"maxObj={r.MaxInstanceId}, maxTile={r.MaxTileId}" +
+                        (r.SkippedCreationCode ? ", skipped creation code" : "") + ")",
+                        null, ReportConfidence.High);
+                    break;
+                case RoomTransplantStatus.AlreadyExists:
+                    reportBuilder.AddSkipped("Room", r.RoomName,
+                        "Already exists in target", r.Diagnostic);
+                    break;
+                case RoomTransplantStatus.Failed:
+                    failed++;
+                    if (failed <= 3)
+                        _logger.LogWarning($"  Room '{r.RoomName}' failed: {r.Diagnostic}");
+                    reportBuilder.AddError("Room", r.RoomName,
+                        r.Diagnostic ?? "Transplant failed");
+                    break;
+                default:
+                    reportBuilder.AddSkipped("Room", r.RoomName,
+                        r.Diagnostic ?? $"Status: {r.Status}");
+                    break;
             }
+        }
+        _logger.Log($"  Room transplant: {transplanted} ok, {failed} failed");
+    }
 
-            // ── 6. Transplant scripts ──
-            if (false && manifest.NewScripts.Count > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewScripts.Count} scripts...");
-                var scriptResults = ScriptTransplanter.TransplantAll(
-                    manifest.NewScripts, moddedIdx, target.Data);
+    // ═══════════════════════════════════════════════════════════════
+    //  Texture diagnostics
+    // ═══════════════════════════════════════════════════════════════
 
-                int transplanted = 0, failed = 0;
-                foreach (var r in scriptResults)
-                {
-                    switch (r.Status)
-                    {
-                        case ScriptTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Script", r.ScriptName,
-                                "Transplanted", null, ReportConfidence.High);
-                            break;
-                        case ScriptTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Script", r.ScriptName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case ScriptTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Script", r.ScriptName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Script", r.ScriptName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Script transplant: {transplanted} ok, {failed} failed");
-            }
+    private void RunTextureDiagnostics(
+        UndertaleData targetData,
+        UndertaleData moddedData,
+        Dictionary<int, UndertaleEmbeddedTexture> textureCloneMap)
+    {
+        _logger.Log($"  [DIAG] Texture clone map: {textureCloneMap.Count} textures cloned from modded→target");
+        _logger.Log($"  [DIAG] Target TXTR count: {targetData.EmbeddedTextures.Count}");
+        _logger.Log($"  [DIAG] Target TPAG count: {targetData.TexturePageItems.Count}");
+        _logger.Log($"  [DIAG] Target SPRT count: {targetData.Sprites.Count}");
+        _logger.Log($"  [DIAG] Target GMS version: Major={targetData.GeneralInfo?.Major}, Minor={targetData.GeneralInfo?.Minor}");
+        _logger.Log($"  [DIAG] Modded GMS version: Major={moddedData.GeneralInfo?.Major}, Minor={moddedData.GeneralInfo?.Minor}");
+        _logger.Log($"  [DIAG] TGIN present: {targetData.TextureGroupInfo != null} (count={targetData.TextureGroupInfo?.Count ?? 0})");
+        _logger.Log($"  [DIAG] IsTPAG4ByteAligned: {targetData.IsTPAG4ByteAligned}");
 
-            // ── 7. Transplant game objects ──
-            if (false && manifest.NewObjects.Count > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewObjects.Count} game objects...");
-                var objectTransplantResults = GameObjectTransplanter.TransplantAll(
-                    manifest.NewObjects, moddedIdx, target.Data);
-
-                int transplanted = 0, failed = 0;
-                foreach (var r in objectTransplantResults)
-                {
-                    switch (r.Status)
-                    {
-                        case GameObjectTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Object", r.ObjectName,
-                                $"Transplanted ({r.EventCount} events)",
-                                null, ReportConfidence.High);
-                            break;
-                        case GameObjectTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Object", r.ObjectName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case GameObjectTransplantStatus.Failed:
-                            failed++;
-                            reportBuilder.AddError("Object", r.ObjectName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Object", r.ObjectName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Object transplant: {transplanted} ok, {failed} failed");
-            }
-
-            // ── 8. Transplant rooms (depends on all above) ──
-            if (manifest.NewRooms.Count > 0)
-            {
-                ct.ThrowIfCancellationRequested();
-                _logger.Log($"Transplanting {manifest.NewRooms.Count} rooms...");
-                var roomResults = RoomTransplanter.TransplantAll(
-                    manifest.NewRooms, moddedIdx, target.Data);
-
-                int transplanted = 0, failed = 0;
-                foreach (var r in roomResults)
-                {
-                    switch (r.Status)
-                    {
-                        case RoomTransplantStatus.Transplanted:
-                            transplanted++;
-                            reportBuilder.AddApplied("Room", r.RoomName,
-                                $"Transplanted ({r.LayerCount} layers, {r.GameObjectCount} instances)",
-                                null, ReportConfidence.High);
-                            break;
-                        case RoomTransplantStatus.AlreadyExists:
-                            reportBuilder.AddSkipped("Room", r.RoomName,
-                                "Already exists in target", r.Diagnostic);
-                            break;
-                        case RoomTransplantStatus.Failed:
-                            failed++;
-                            if (failed <= 3)
-                                _logger.LogWarning($"  Room '{r.RoomName}' failed: {r.Diagnostic}");
-                            reportBuilder.AddError("Room", r.RoomName,
-                                r.Diagnostic ?? "Transplant failed");
-                            break;
-                        default:
-                            reportBuilder.AddSkipped("Room", r.RoomName,
-                                r.Diagnostic ?? $"Status: {r.Status}");
-                            break;
-                    }
-                }
-                _logger.Log($"  Room transplant: {transplanted} ok, {failed} failed");
-            }
-
-            // Rebuild target name index after transplants (new resources were added)
-            ct.ThrowIfCancellationRequested();
-            _logger.Log("Rebuilding target name index after transplants...");
-            targetIdx = NameIndex.Build(target.Data);
+        // Dump details of each cloned texture
+        foreach (var (srcIdx, clonedTex) in textureCloneMap)
+        {
+            var img = clonedTex.TextureData?.Image;
+            int clonedTexIdx = targetData.EmbeddedTextures.IndexOf(clonedTex);
+            _logger.Log(
+                $"  [DIAG] TXTR[modded:{srcIdx}→target:{clonedTexIdx}]: " +
+                $"Scaled={clonedTex.Scaled}, " +
+                $"GeneratedMips={clonedTex.GeneratedMips}, " +
+                $"TextureWidth={clonedTex.TextureWidth}, " +
+                $"TextureHeight={clonedTex.TextureHeight}, " +
+                $"IndexInGroup={clonedTex.IndexInGroup}, " +
+                $"ImageFormat={img?.Format}, " +
+                $"ImageW={img?.Width}, ImageH={img?.Height}, " +
+                $"DataLen={img?.ToSpan().Length}");
         }
 
-        // ─────────────────────────────────────────────────────────
-        // Phase 0b: Patch event bindings on existing objects
-        // If a mod adds new events to existing objects, the code entries
-        // are transplanted above, but the event→code binding on the object
-        // must also be created.
-        // ─────────────────────────────────────────────────────────
+        // Validate TPAG references
+        int tpagErrors = 0;
+        foreach (var tpag in targetData.TexturePageItems)
+        {
+            if (tpag.TexturePage is null)
+            {
+                _logger.LogWarning($"  [DIAG] TPAG item has null TexturePage!");
+                tpagErrors++;
+                continue;
+            }
+            int texIdx = targetData.EmbeddedTextures.IndexOf(tpag.TexturePage);
+            if (texIdx < 0)
+            {
+                _logger.LogWarning($"  [DIAG] TPAG item references EmbeddedTexture NOT in target list!");
+                tpagErrors++;
+            }
+        }
+        _logger.Log(tpagErrors > 0
+            ? $"  [DIAG] {tpagErrors} TPAG reference error(s) found!"
+            : $"  [DIAG] All TPAG references valid.");
+
+        // Validate sprite→TPAG references
+        int sprtErrors = 0;
+        foreach (var spr in targetData.Sprites)
+        {
+            if (spr.Textures is null) continue;
+            foreach (var texEntry in spr.Textures)
+            {
+                if (texEntry?.Texture is null) continue;
+                int tpagIdx = targetData.TexturePageItems.IndexOf(texEntry.Texture);
+                if (tpagIdx < 0)
+                {
+                    _logger.LogWarning($"  [DIAG] Sprite '{spr.Name?.Content}' references TPAG NOT in target list!");
+                    sprtErrors++;
+                }
+            }
+        }
+        _logger.Log(sprtErrors > 0
+            ? $"  [DIAG] {sprtErrors} sprite→TPAG reference error(s) found!"
+            : $"  [DIAG] All sprite→TPAG references valid.");
+
+        // Check Scaled values consistency
+        var scaledValues = targetData.EmbeddedTextures
+            .Select(t => t.Scaled)
+            .Distinct()
+            .ToList();
+        _logger.Log($"  [DIAG] Scaled values in target TXTR: [{string.Join(", ", scaledValues)}]");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Phase 0b: Event bindings
+    // ═══════════════════════════════════════════════════════════════
+
+    private void PatchEventBindings(
+        NameIndex vanillaIdx,
+        NameIndex moddedIdx,
+        UndertaleData targetData,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         _logger.Log("Patching object event bindings...");
-        var eventPatchResults = true
-            ? ObjectEventPatcher.PatchAll(vanillaIdx, moddedIdx, target.Data)
-            : new List<ObjectEventPatchResult>();
+        var results = ObjectEventPatcher.PatchAll(vanillaIdx, moddedIdx, targetData);
 
-        if (eventPatchResults.Count > 0)
-        {
-            int totalAdded = 0, totalFailed = 0;
-            foreach (var r in eventPatchResults)
-            {
-                totalAdded += r.EventsAdded;
-                totalFailed += r.EventsFailed;
-
-                switch (r.Status)
-                {
-                    case ObjectEventPatchStatus.Applied:
-                        reportBuilder.AddApplied("ObjectEvent", r.ObjectName,
-                            $"{r.EventsAdded} event(s) bound",
-                            r.Diagnostic, ReportConfidence.High);
-                        break;
-                    case ObjectEventPatchStatus.Failed:
-                        reportBuilder.AddError("ObjectEvent", r.ObjectName,
-                            r.Diagnostic ?? "Event binding failed");
-                        break;
-                    case ObjectEventPatchStatus.ObjectMissing:
-                        reportBuilder.AddSkipped("ObjectEvent", r.ObjectName,
-                            "Object not found in target");
-                        break;
-                }
-            }
-            _logger.Log($"  Event bindings: {totalAdded} added on {eventPatchResults.Count} object(s), {totalFailed} failed");
-        }
-        else
+        if (results.Count == 0)
         {
             _logger.Log("  No new event bindings needed.");
+            return;
         }
 
-        // ─────────────────────────────────────────────────────────
-        // Phase 1: Compute diffs for existing (shared) resources
-        // ─────────────────────────────────────────────────────────
+        int totalAdded = 0, totalFailed = 0;
+        foreach (var r in results)
+        {
+            totalAdded += r.EventsAdded;
+            totalFailed += r.EventsFailed;
+
+            switch (r.Status)
+            {
+                case ObjectEventPatchStatus.Applied:
+                    reportBuilder.AddApplied("ObjectEvent", r.ObjectName,
+                        $"{r.EventsAdded} event(s) bound",
+                        r.Diagnostic, ReportConfidence.High);
+                    break;
+                case ObjectEventPatchStatus.Failed:
+                    reportBuilder.AddError("ObjectEvent", r.ObjectName,
+                        r.Diagnostic ?? "Event binding failed");
+                    break;
+                case ObjectEventPatchStatus.ObjectMissing:
+                    reportBuilder.AddSkipped("ObjectEvent", r.ObjectName,
+                        "Object not found in target");
+                    break;
+            }
+        }
+        _logger.Log($"  Event bindings: {totalAdded} added on {results.Count} object(s), {totalFailed} failed");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Phase 1: Diff computation and patch application
+    // ═══════════════════════════════════════════════════════════════
+
+    private void ApplyDiffPatches(
+        ArchiveLoader.LoadResult vanilla,
+        ArchiveLoader.LoadResult modded,
+        ArchiveLoader.LoadResult target,
+        NameIndex vanillaIdx,
+        NameIndex moddedIdx,
+        NameIndex targetIdx,
+        PatchReportBuilder reportBuilder,
+        CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
 
         // Compute diffs
@@ -804,14 +1135,41 @@ public sealed class TranslationPipeline
         _logger.Log("Computing object diffs...");
         var objectDiffs = ObjectDiffer.DiffAll(vanillaIdx, moddedIdx);
 
-        var codeEntriesWithStringOnlyDiffs = new HashSet<string>(StringComparer.Ordinal);
-
         // Convert diffs to patch requests
         ct.ThrowIfCancellationRequested();
         _logger.Log("Building patch requests...");
 
-        // String patches
-        var stringRequests = new List<StringPatchRequest>();
+        var codeEntriesWithStringOnlyDiffs = new HashSet<string>(StringComparer.Ordinal);
+        var stringRequests = BuildStringPatchRequests(stringDiffs, reportBuilder);
+        var codeRequests = BuildCodePatchRequests(codeDiffs, modded.Data, codeEntriesWithStringOnlyDiffs, reportBuilder);
+        var objectRequests = BuildObjectPatchRequests(objectDiffs, reportBuilder);
+
+        // Apply patches
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Applying {stringRequests.Count} string patches...");
+        var stringResults = StringPatcher.ApplyMany(target.Data, stringRequests);
+        var codeEntriesWithAppliedStrings = ReportStringResults(stringResults, reportBuilder);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Applying {codeRequests.Count} code patches...");
+        var codeResults = CodePatcher.ApplyMany(target.Data, codeRequests);
+        ReportCodeResults(codeResults, codeEntriesWithStringOnlyDiffs, codeEntriesWithAppliedStrings, reportBuilder);
+
+        ct.ThrowIfCancellationRequested();
+        _logger.Log($"Applying {objectRequests.Count} object patches...");
+        ApplyObjectPatches(objectRequests, targetIdx, reportBuilder);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // Diff → patch request builders
+    // ─────────────────────────────────────────────────────────
+
+    private List<StringPatchRequest> BuildStringPatchRequests(
+        IReadOnlyList<CodeStringDiffResult> stringDiffs,
+        PatchReportBuilder reportBuilder)
+    {
+        var requests = new List<StringPatchRequest>();
+
         foreach (var diff in stringDiffs)
         {
             if (diff.Status == CodeStringDiffStatus.CodeEntryMissing)
@@ -823,7 +1181,6 @@ public sealed class TranslationPipeline
 
             foreach (var change in diff.Changes)
             {
-                // Skip only truly ambiguous matches (multiple candidates, no way to pick)
                 if (change.Confidence == StringMatchConfidence.Ambiguous)
                 {
                     reportBuilder.AddSkipped("String", $"{diff.CodeEntryName}[{change.ModdedOrdinal}]",
@@ -840,7 +1197,6 @@ public sealed class TranslationPipeline
                     continue;
                 }
 
-                // Log lower confidence matches as risky but still apply them
                 if (change.Confidence == StringMatchConfidence.ContentMatchOnly)
                 {
                     reportBuilder.AddRisky("String", $"{diff.CodeEntryName}[{change.ModdedOrdinal}]",
@@ -852,7 +1208,7 @@ public sealed class TranslationPipeline
                     change.ModdedContext.Preceding,
                     change.ModdedContext.Following);
 
-                stringRequests.Add(new StringPatchRequest(
+                requests.Add(new StringPatchRequest(
                     diff.CodeEntryName,
                     change.VanillaOrdinal.Value,
                     change.OldContent,
@@ -861,8 +1217,17 @@ public sealed class TranslationPipeline
             }
         }
 
-        // Code patches
-        var codeRequests = new List<CodePatchRequest>();
+        return requests;
+    }
+
+    private List<CodePatchRequest> BuildCodePatchRequests(
+        IReadOnlyList<CodeDiffResult> codeDiffs,
+        UndertaleData moddedData,
+        HashSet<string> codeEntriesWithStringOnlyDiffs,
+        PatchReportBuilder reportBuilder)
+    {
+        var requests = new List<CodePatchRequest>();
+
         foreach (var diff in codeDiffs)
         {
             if (diff.Status == CodeDiffStatus.CodeEntryMissing)
@@ -900,21 +1265,13 @@ public sealed class TranslationPipeline
 
             if (nonStringDiffCount > 0)
             {
-                // Log non-string changes as risky — they won't be patched by the code patcher,
-                // but string changes in this entry are still handled by the string patcher.
-                reportBuilder.AddRisky("Code", diff.CodeEntryName,
-                    $"{nonStringDiffCount} non-string instruction change(s) not transferred " +
-                    $"(logic/numeric changes); {stringDiffCount} string change(s) handled via string patcher",
-                    $"{diff.Differences.Count} total instruction difference(s)");
-
-                // Don't add to codeRequests — code patcher would reject it due to structural mismatch.
-                // String changes are handled by the string diff/patch path which runs independently.
+                // Bytecode replacement handled in Phase 1a; skip here
                 continue;
             }
 
             codeEntriesWithStringOnlyDiffs.Add(diff.CodeEntryName);
 
-            var moddedCode = modded.Data.Code?.FirstOrDefault(c => c.Name?.Content == diff.CodeEntryName);
+            var moddedCode = moddedData.Code?.FirstOrDefault(c => c.Name?.Content == diff.CodeEntryName);
             if (moddedCode is null)
             {
                 reportBuilder.AddSkipped("Code", diff.CodeEntryName,
@@ -923,11 +1280,18 @@ public sealed class TranslationPipeline
             }
 
             var snapshot = CodeSnapshotBuilder.Build(moddedCode);
-            codeRequests.Add(new CodePatchRequest(diff.CodeEntryName, snapshot));
+            requests.Add(new CodePatchRequest(diff.CodeEntryName, snapshot));
         }
 
-        // Object patches
-        var objectRequests = new List<ObjectPatchRequest>();
+        return requests;
+    }
+
+    private static List<ObjectPatchRequest> BuildObjectPatchRequests(
+        IReadOnlyList<ObjectDiffResult> objectDiffs,
+        PatchReportBuilder reportBuilder)
+    {
+        var requests = new List<ObjectPatchRequest>();
+
         foreach (var diff in objectDiffs)
         {
             if (diff.Status == ObjectDiffStatus.Missing)
@@ -950,21 +1314,27 @@ public sealed class TranslationPipeline
                 });
             }
 
-            objectRequests.Add(new ObjectPatchRequest
+            requests.Add(new ObjectPatchRequest
             {
                 ObjectName = diff.ObjectName,
                 Patches = patches
             });
         }
 
-        // Apply patches
-        ct.ThrowIfCancellationRequested();
-        _logger.Log($"Applying {stringRequests.Count} string patches...");
-        var stringResults = StringPatcher.ApplyMany(target.Data, stringRequests);
+        return requests;
+    }
 
+    // ─────────────────────────────────────────────────────────
+    // Patch result reporters
+    // ─────────────────────────────────────────────────────────
+
+    private static HashSet<string> ReportStringResults(
+        IReadOnlyList<StringPatchResult> results,
+        PatchReportBuilder reportBuilder)
+    {
         var codeEntriesWithAppliedStrings = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var r in stringResults)
+        foreach (var r in results)
         {
             var resourceName = $"{r.CodeName}[{r.Ordinal}]";
             var confidence = r.Confidence switch
@@ -994,12 +1364,19 @@ public sealed class TranslationPipeline
             }
         }
 
-        ct.ThrowIfCancellationRequested();
-        _logger.Log($"Applying {codeRequests.Count} code patches...");
-        var codeResults = CodePatcher.ApplyMany(target.Data, codeRequests);
+        return codeEntriesWithAppliedStrings;
+    }
 
-        foreach (var r in codeResults)
+    private static void ReportCodeResults(
+        IReadOnlyList<CodePatchResult> results,
+        HashSet<string> codeEntriesWithStringOnlyDiffs,
+        HashSet<string> codeEntriesWithAppliedStrings,
+        PatchReportBuilder reportBuilder)
+    {
+        foreach (var r in results)
         {
+            // Suppress noise: code entries where the only changes were strings
+            // already handled by the string patcher
             if (r.Status == CodePatchStatus.Skipped &&
                 (r.Message?.Contains("No differences") == true || r.Message?.Contains("already match") == true) &&
                 codeEntriesWithStringOnlyDiffs.Contains(r.CodeName) &&
@@ -1031,10 +1408,14 @@ public sealed class TranslationPipeline
                     break;
             }
         }
+    }
 
-        ct.ThrowIfCancellationRequested();
-        _logger.Log($"Applying {objectRequests.Count} object patches...");
-        foreach (var req in objectRequests)
+    private static void ApplyObjectPatches(
+        List<ObjectPatchRequest> requests,
+        NameIndex targetIdx,
+        PatchReportBuilder reportBuilder)
+    {
+        foreach (var req in requests)
         {
             var result = ObjectPatcher.Apply(req, targetIdx);
 
@@ -1064,8 +1445,21 @@ public sealed class TranslationPipeline
                     break;
             }
         }
+    }
 
-        // Write output
+    // ═══════════════════════════════════════════════════════════════
+    //  Phase 2: Output writing
+    // ═══════════════════════════════════════════════════════════════
+
+    private TranslationResult WriteOutput(
+        ArchiveLoader.LoadResult target,
+        string outputPath,
+        PatchReportBuilder reportBuilder,
+        string? reportPath,
+        bool dryRun,
+        bool backup,
+        CancellationToken ct)
+    {
         var tempReport = reportBuilder.Build();
         int totalApplied = tempReport.AppliedCount;
         string? writtenOutputPath = null;
@@ -1122,6 +1516,10 @@ public sealed class TranslationPipeline
         };
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  Shared utilities
+    // ═══════════════════════════════════════════════════════════════
+
     private TranslationResult Fail(
         PatchReportBuilder reportBuilder,
         string errorMessage,
@@ -1149,6 +1547,69 @@ public sealed class TranslationPipeline
             try { File.Delete(tempPath); }
             catch { /* best effort */ }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Classification logging
+    // ═══════════════════════════════════════════════════════════════
+
+    private void LogClassification(ModClassification classification)
+    {
+        var verdictStr = classification.Verdict switch
+        {
+            PortabilityVerdict.Portable => "✅ PORTABLE",
+            PortabilityVerdict.MostlyPortable => "⚠️  MOSTLY PORTABLE",
+            PortabilityVerdict.PatchableOnly => "⚠ PATCHABLE ONLY",
+            PortabilityVerdict.NotPortable => "❌ NOT PORTABLE",
+            _ => "?"
+        };
+
+        _logger.Log("");
+        _logger.Log("═══════════════════════════════════════════════════════════");
+        _logger.Log($"  PRE-FLIGHT CLASSIFICATION: {verdictStr}");
+        _logger.Log($"  {classification.Summary}");
+        _logger.Log($"  Estimated auto-portable: {classification.EstimatedSuccessPercent}%");
+        _logger.Log("═══════════════════════════════════════════════════════════");
+
+        var b = classification.Breakdown;
+        _logger.Log($"  Resources: {b.TotalNewResources} new, {b.TotalModifiedResources} modified");
+        _logger.Log($"  Code: {b.NewCodeEntryCount} new ({b.NewCodePortableCount} portable, {b.NewCodeUnsupportedCount} unsupported)");
+        _logger.Log($"  Code: {b.ModifiedCodeEntryCount} modified ({b.ModifiedCodeWithGms2OnlyRefsCount} with GMS2-only refs, {b.ModifiedCodeWithChildEntriesCount} with child entries)");
+
+        if (b.NewRoomCount > 0)
+            _logger.Log($"  Rooms: {b.NewRoomCount} new (risky)");
+
+        // Log non-info issues
+        var significantIssues = classification.Issues
+            .Where(i => i.Severity != ClassificationSeverity.Info)
+            .ToList();
+
+        if (significantIssues.Count > 0)
+        {
+            _logger.Log("");
+            foreach (var issue in significantIssues)
+            {
+                var prefix = issue.Severity switch
+                {
+                    ClassificationSeverity.Blocker => "❌ BLOCKER",
+                    ClassificationSeverity.Major => "⚠ MAJOR",
+                    ClassificationSeverity.Minor => "ℹ MINOR",
+                    _ => "  INFO"
+                };
+
+                if (issue.Severity == ClassificationSeverity.Blocker)
+                    _logger.LogError($"  [{prefix}] {issue.Code}: {issue.Message}");
+                else if (issue.Severity == ClassificationSeverity.Major)
+                    _logger.LogWarning($"  [{prefix}] {issue.Code}: {issue.Message}");
+                else
+                    _logger.Log($"  [{prefix}] {issue.Code}: {issue.Message}");
+
+                if (issue.Detail is not null)
+                    _logger.Log($"           {issue.Detail}");
+            }
+        }
+
+        _logger.Log("");
     }
 
     private static string Truncate(string s, int maxLen)

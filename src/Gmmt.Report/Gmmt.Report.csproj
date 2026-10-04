@@ -1,2 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gmmt.Report</RootNamespace>
+    <AssemblyName>Gmmt.Report</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Gmmt.Core\Gmmt.Core.csproj" />
+    <ProjectReference Include="..\Gmmt.Diff\Gmmt.Diff.csproj" />
+  </ItemGroup>
+
 </Project>

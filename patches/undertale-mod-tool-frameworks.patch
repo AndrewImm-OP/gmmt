@@ -1,0 +1,62 @@
+diff --git a/UndertaleModCli/UndertaleModCli.csproj b/UndertaleModCli/UndertaleModCli.csproj
+index d05e1677..9ce16c79 100644
+--- a/UndertaleModCli/UndertaleModCli.csproj
++++ b/UndertaleModCli/UndertaleModCli.csproj
+@@ -2,7 +2,7 @@
+ 
+   <PropertyGroup>
+     <OutputType>Exe</OutputType>
+-    <TargetFramework>net8.0</TargetFramework>
++    <TargetFramework>net9.0</TargetFramework>
+     <Platforms>AnyCPU;x64</Platforms>
+     <Nullable>disable</Nullable>
+     <RollForward>LatestMajor</RollForward>
+diff --git a/UndertaleModLib/UndertaleModLib.csproj b/UndertaleModLib/UndertaleModLib.csproj
+index 5b201818..34aeb965 100644
+--- a/UndertaleModLib/UndertaleModLib.csproj
++++ b/UndertaleModLib/UndertaleModLib.csproj
+@@ -1,6 +1,6 @@
+ <Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+-    <TargetFramework>net8.0</TargetFramework>
++    <TargetFramework>net10.0</TargetFramework>
+     <LangVersion>11</LangVersion>
+     <OutputType>Library</OutputType>
+     <!-- AssemblyInfo -->
+diff --git a/UndertaleModLibTests/UndertaleModLibTests.csproj b/UndertaleModLibTests/UndertaleModLibTests.csproj
+index f37d8f97..5cfe48cc 100644
+--- a/UndertaleModLibTests/UndertaleModLibTests.csproj
++++ b/UndertaleModLibTests/UndertaleModLibTests.csproj
+@@ -1,7 +1,7 @@
+ ﻿<Project Sdk="Microsoft.NET.Sdk">
+ 
+     <PropertyGroup>
+-        <TargetFramework>net8.0</TargetFramework>
++        <TargetFramework>net9.0</TargetFramework>
+         <ImplicitUsings>enable</ImplicitUsings>
+         <Nullable>enable</Nullable>
+ 
+diff --git a/UndertaleModTests/UndertaleModTests.csproj b/UndertaleModTests/UndertaleModTests.csproj
+index efdde741..5b17cb8e 100644
+--- a/UndertaleModTests/UndertaleModTests.csproj
++++ b/UndertaleModTests/UndertaleModTests.csproj
+@@ -1,6 +1,6 @@
+ ﻿<Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+-    <TargetFramework>net8.0</TargetFramework>
++    <TargetFramework>net9.0</TargetFramework>
+     <OutputType>Library</OutputType>
+     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+     <Platforms>AnyCPU;x64</Platforms>
+diff --git a/UndertaleModTool/UndertaleModTool.csproj b/UndertaleModTool/UndertaleModTool.csproj
+index aa606fdc..4804fc20 100644
+--- a/UndertaleModTool/UndertaleModTool.csproj
++++ b/UndertaleModTool/UndertaleModTool.csproj
+@@ -1,6 +1,6 @@
+ <Project Sdk="Microsoft.NET.Sdk">
+     <PropertyGroup>
+-        <TargetFramework>net8.0-windows</TargetFramework>
++        <TargetFramework>net9.0-windows</TargetFramework>
+         <RollForward>LatestMajor</RollForward>
+         <OutputType>WinExe</OutputType>
+         <!-- TODO: this should properly get migrated and get rid of -->
