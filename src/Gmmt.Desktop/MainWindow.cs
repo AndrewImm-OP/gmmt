@@ -70,54 +70,74 @@ public sealed class MainWindow : Window
 
         var build = new StackPanel { Spacing = 16, Margin = new Thickness(0, 16, 0, 20) };
         build.Children.Add(Heading("build.heading", "build.description"));
-        build.Children.Add(Field("input.label", input));
-        build.Children.Add(Field("assets.label", assets, true));
+        build.Children.Add(Field("input.label", input, tooltipKey: "tooltip.input"));
+        var vanillaField = Field("vanilla.label", vanilla, tooltipKey: "tooltip.vanilla");
+        var depotSearchBtn = Action("steam.depotSearch", Discover, tooltipKey: "tooltip.depotSearch");
+        depotSearchBtn.Margin = new Thickness(0, 0, 0, 8);
+        build.Children.Add(vanillaField);
+        build.Children.Add(depotSearchBtn);
+        build.Children.Add(Field("assets.label", assets, folder: true, tooltipKey: "tooltip.assets"));
         build.Children.Add(separate);
-        var packageOutput = Field("output.label", output, true, true);
+        Bind(() => ToolTip.SetTip(separate, T("tooltip.separate")));
+        var packageOutput = Field("output.label", output, folder: true, newFolder: true, tooltipKey: "tooltip.output");
         build.Children.Add(packageOutput);
-        var installation = new StackPanel { Spacing = 12, IsVisible = false };
-        installation.Children.Add(discoveredGames);
-        installation.Children.Add(Field("steam.label", steamDirectory, true));
-        installation.Children.Add(Action("steam.search", Discover));
-        discoveredGames.SelectionChanged += (_, _) => { if (discoveredGames.SelectedItem is DiscoveredGame found) steamDirectory.Text = found.Directory; };
-        installation.Children.Add(Note("steam.notice"));
-        installation.Children.Add(Action("steam.restore", RestoreSteam));
-        build.Children.Add(installation);
-        separate.IsCheckedChanged += (_, _) => { packageOutput.IsVisible = separate.IsChecked == true; installation.IsVisible = separate.IsChecked != true; };
+
         var advanced = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 8) };
-        advanced.Children.Add(Field("vanilla.label", vanilla));
-        var depotBtn = Action("steam.downloadDepot", DownloadDepotPrompt);
-        depotBtn.Margin = new Thickness(0, 0, 0, 4);
-        advanced.Children.Add(depotBtn);
-        advanced.Children.Add(Field("libraries.label", libraries, true));
-        advanced.Children.Add(Field("runner.label", runnerId, noBrowse: true));
+        advanced.Children.Add(Field("libraries.label", libraries, folder: true, tooltipKey: "tooltip.libraries"));
+        advanced.Children.Add(Field("runner.label", runnerId, noBrowse: true, tooltipKey: "tooltip.runner"));
         reviewed.Content = Label("extensions.review");
+        Bind(() => ToolTip.SetTip(reviewed, T("tooltip.reviewed")));
         advanced.Children.Add(reviewed);
         build.Children.Add(Disclosure("advanced", advanced));
+
         var actions = new WrapPanel { Orientation = Orientation.Horizontal };
-        var primary = Action("build.action", () => Build(true));
+        var primary = Action("build.action", () => Build(true), tooltipKey: "tooltip.buildAction");
         primary.Classes.Add("primary");
         Bind(() => primary.Content = T(separate.IsChecked == true ? "build.action" : "steam.install"));
         separate.IsCheckedChanged += (_, _) => primary.Content = T(separate.IsChecked == true ? "build.action" : "steam.install");
         primary.Margin = new Thickness(0, 0, 12, 8);
         actions.Children.Add(primary);
-        var inspect = Action("build.inspect", () => Build(false));
+        var inspect = Action("build.inspect", () => Build(false), tooltipKey: "tooltip.inspectAction");
         inspect.Margin = new Thickness(0, 0, 0, 8);
         actions.Children.Add(inspect);
         build.Children.Add(actions);
         build.Children.Add(Note("build.notice"));
 
+        var steamTab = new StackPanel { Spacing = 16, Margin = new Thickness(0, 16, 0, 20) };
+        steamTab.Children.Add(Heading("steam.heading", "steam.description"));
+        steamTab.Children.Add(Label("steam.label", 13, FontWeight.Medium));
+        steamTab.Children.Add(discoveredGames);
+        steamTab.Children.Add(Field("steam.label", steamDirectory, folder: true, tooltipKey: "tooltip.steamDirectory"));
+        discoveredGames.SelectionChanged += (_, _) => { if (discoveredGames.SelectedItem is DiscoveredGame found) steamDirectory.Text = found.Directory; };
+        
+        var steamActions = new WrapPanel { Orientation = Orientation.Horizontal };
+        var steamSearchBtn = Action("steam.search", Discover);
+        steamSearchBtn.Margin = new Thickness(0, 0, 12, 8);
+        steamActions.Children.Add(steamSearchBtn);
+        var depotBtn = Action("steam.downloadDepot", DownloadDepotPrompt, tooltipKey: "tooltip.downloadDepot");
+        depotBtn.Margin = new Thickness(0, 0, 12, 8);
+        steamActions.Children.Add(depotBtn);
+        var deltaruneBtn = Action("steam.installDeltarune", InstallDeltarune, tooltipKey: "tooltip.installDeltarune");
+        deltaruneBtn.Margin = new Thickness(0, 0, 12, 8);
+        steamActions.Children.Add(deltaruneBtn);
+        var restoreBtn = Action("steam.restore", RestoreSteam, tooltipKey: "tooltip.restoreSteam");
+        restoreBtn.Margin = new Thickness(0, 0, 0, 8);
+        steamActions.Children.Add(restoreBtn);
+        steamTab.Children.Add(steamActions);
+        steamTab.Children.Add(Note("steam.notice"));
+
+        separate.IsCheckedChanged += (_, _) => {
+            packageOutput.IsVisible = separate.IsChecked == true;
+        };
+
         var donors = new StackPanel { Spacing = 16, Margin = new Thickness(0, 16, 0, 20) };
         donors.Children.Add(Heading("runners.heading", "runners.description"));
         donors.Children.Add(discoveredRunners);
-        donors.Children.Add(Disclosure("search.extra", Field("search.label", extraRunnerRoots, true)));
+        donors.Children.Add(Disclosure("search.extra", Field("search.label", extraRunnerRoots, folder: true)));
         var runnerSearchActions = new WrapPanel { Orientation = Orientation.Horizontal };
         var searchRunnersBtn = Action("runners.search", Discover);
         searchRunnersBtn.Margin = new Thickness(0, 0, 12, 8);
         runnerSearchActions.Children.Add(searchRunnersBtn);
-        var deltaruneBtn = Action("steam.installDeltarune", InstallDeltarune);
-        deltaruneBtn.Margin = new Thickness(0, 0, 0, 8);
-        runnerSearchActions.Children.Add(deltaruneBtn);
         donors.Children.Add(runnerSearchActions);
         donors.Children.Add(Note("runners.notice"));
         discoveredRunners.SelectionChanged += (_, _) =>
@@ -127,11 +147,11 @@ public sealed class MainWindow : Window
             var slug = System.Text.RegularExpressions.Regex.Replace(found.Game.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
             donorId.Text = (slug.Length == 0 ? "runner" : slug) + "-linux";
         };
-        donors.Children.Add(Field("catalog.label", catalog));
-        donors.Children.Add(Field("id.label", donorId, noBrowse: true));
-        donors.Children.Add(Field("elf.label", donorRunner));
-        donors.Children.Add(Field("reference.label", reference));
-        donors.Children.Add(Disclosure("runtime.optional", Field("runtime.label", runtime)));
+        donors.Children.Add(Field("catalog.label", catalog, tooltipKey: "tooltip.catalog"));
+        donors.Children.Add(Field("id.label", donorId, noBrowse: true, tooltipKey: "tooltip.donorId"));
+        donors.Children.Add(Field("elf.label", donorRunner, tooltipKey: "tooltip.donorRunner"));
+        donors.Children.Add(Field("reference.label", reference, tooltipKey: "tooltip.reference"));
+        donors.Children.Add(Disclosure("runtime.optional", Field("runtime.label", runtime, tooltipKey: "tooltip.runtime")));
         var donorActions = new WrapPanel();
         var add = Action("runners.add", Register); add.Classes.Add("primary"); add.Margin = new Thickness(0, 0, 12, 8);
         donorActions.Children.Add(add);
@@ -140,6 +160,7 @@ public sealed class MainWindow : Window
         donors.Children.Add(Note("runners.local"));
         tabs.ItemsSource = new[] {
             LocalizedTab("tab.build", new ScrollViewer { Content = build }),
+            LocalizedTab("tab.steam", new ScrollViewer { Content = steamTab }),
             LocalizedTab("tab.runners", new ScrollViewer { Content = donors })
         };
         var header = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 0, 0, 20) };
@@ -218,11 +239,20 @@ public sealed class MainWindow : Window
     }
 
     private TextBlock Note(string key) { var block = Label(key); block.MaxWidth = 820; block.Foreground = Muted; block.FontSize = 13; block.LineHeight = 20; return block; }
-    private Control Field(string label, TextBox box, bool folder = false, bool newFolder = false, bool noBrowse = false)
+    private Control Field(string label, TextBox box, bool folder = false, bool newFolder = false, bool noBrowse = false, string? tooltipKey = null)
     {
         var field = new StackPanel { Spacing = 7 };
-        field.Children.Add(Label(label, 13, FontWeight.Medium));
+        var labelBlock = Label(label, 13, FontWeight.Medium);
+        field.Children.Add(labelBlock);
         Bind(() => AutomationProperties.SetName(box, T(label)));
+        if (tooltipKey != null)
+        {
+            Bind(() => {
+                var text = T(tooltipKey);
+                ToolTip.SetTip(box, text);
+                ToolTip.SetTip(labelBlock, text);
+            });
+        }
         box.MinHeight = 38;
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         row.Children.Add(box);
@@ -256,10 +286,14 @@ public sealed class MainWindow : Window
         field.Children.Add(row); return field;
     }
 
-    private Button Action(string title, Func<Task> action)
+    private Button Action(string title, Func<Task> action, string? tooltipKey = null)
     {
         var button = new Button { MinHeight = 40, Padding = new Thickness(18, 8) };
         Bind(() => button.Content = T(title));
+        if (tooltipKey != null)
+        {
+            Bind(() => ToolTip.SetTip(button, T(tooltipKey)));
+        }
         button.Click += async (_, _) =>
         {
             language.IsEnabled = false;
@@ -303,12 +337,15 @@ public sealed class MainWindow : Window
             ?? found.Games.FirstOrDefault(g => g.Name.Equals("Undertale", StringComparison.OrdinalIgnoreCase)) ?? found.Games.FirstOrDefault();
         if (game != null && (Value(steamDirectory).Length == 0 || found.Games.Any(g => g.Directory == Value(steamDirectory)))) discoveredGames.SelectedItem = game;
         if (Value(donorRunner).Length == 0 && found.Runners.Length != 0) discoveredRunners.SelectedIndex = 0;
-        if (string.IsNullOrWhiteSpace(Value(vanilla)) && found.Depots.Length != 0)
+        if (found.Depots.Length != 0)
         {
             var matchingDepot = (discoveredGames.SelectedItem is DiscoveredGame dg && dg.AppId != null
                 ? found.Depots.FirstOrDefault(d => d.AppId == dg.AppId)
                 : null) ?? found.Depots.FirstOrDefault();
-            if (matchingDepot != null) vanilla.Text = matchingDepot.ArchivePath;
+            if (matchingDepot != null && (string.IsNullOrWhiteSpace(Value(vanilla)) || !File.Exists(Value(vanilla))))
+            {
+                vanilla.Text = matchingDepot.ArchivePath;
+            }
         }
         if (!tabs.IsEnabled) return;
         SetLog(() => F("discovery.summary", found.Libraries.Length, found.Games.Length, found.Runners.Length)

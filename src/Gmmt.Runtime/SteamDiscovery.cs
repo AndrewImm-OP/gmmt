@@ -187,12 +187,27 @@ public static class SteamDiscovery
                     {
                         cancellation.ThrowIfCancellationRequested();
                         var depotId = Path.GetFileName(depotDir).Replace("depot_", "");
-                        foreach (var file in Directory.EnumerateFiles(depotDir, "*.*", SearchOption.AllDirectories).Take(64))
+                        // Check common archive filenames directly in depot root first, then search recursively if needed
+                        var candidates = new[] { "data.win", "game.win", "game.unx" };
+                        bool foundDirect = false;
+                        foreach (var name in candidates)
                         {
-                            var fname = Path.GetFileName(file).ToLowerInvariant();
-                            if (fname is "data.win" or "game.win" or "game.unx")
+                            var direct = Path.Combine(depotDir, name);
+                            if (File.Exists(direct))
                             {
-                                depots.Add(new(appId, depotId, Path.GetFullPath(file)));
+                                depots.Add(new(appId, depotId, Path.GetFullPath(direct)));
+                                foundDirect = true;
+                            }
+                        }
+                        if (!foundDirect)
+                        {
+                            foreach (var file in Directory.EnumerateFiles(depotDir, "*.*", SearchOption.AllDirectories).Take(512))
+                            {
+                                var fname = Path.GetFileName(file).ToLowerInvariant();
+                                if (fname is "data.win" or "game.win" or "game.unx")
+                                {
+                                    depots.Add(new(appId, depotId, Path.GetFullPath(file)));
+                                }
                             }
                         }
                     }

@@ -36,13 +36,13 @@ try
     input.Text = "/tmp/preserved-mod.win";
     catalog.Text = Path.Combine(root, "empty-catalog.json");
     separate.IsChecked = false;
-    tabs.SelectedIndex = 1;
+    tabs.SelectedIndex = 2;
     var list = window.GetLogicalDescendants().OfType<Button>().Distinct().Single(b => b.Content?.ToString() == "Show catalog");
     list.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
     Check(Find<TextBox>(window, "OperationLog").Text == "The catalog is empty.", "English catalog result failed");
     language.SelectedIndex = 2;
     Check(window.Title == "GMMT · Моды для Linux" && locale.Preference == "ru", "Live Russian selection failed");
-    Check(input.Text == "/tmp/preserved-mod.win" && tabs.SelectedIndex == 1 && separate.IsChecked == false, "Language change reset workflow state");
+    Check(input.Text == "/tmp/preserved-mod.win" && tabs.SelectedIndex == 2 && separate.IsChecked == false, "Language change reset workflow state");
     Check(Find<TextBox>(window, "OperationLog").Text == "Каталог пуст." && Find<TextBlock>(window, "OperationStatus").Text == "Готово", "Result/status were not retranslated");
     Check(window.GetLogicalDescendants().OfType<Button>().Any(b => b.Content?.ToString() == "Установить мод в Steam"), "Dynamic installation button was not translated");
     tabs.SelectedIndex = 0;
