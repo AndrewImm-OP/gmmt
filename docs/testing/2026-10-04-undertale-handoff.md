@@ -357,3 +357,86 @@ Updated 0.2.1 packages are rebuilt after the discovery fixes, not reused from th
 The final four distribution artifacts passed scripts/verify-linux.py again: identical payload hashes across formats, autonomous CLI, executable launchers, desktop entries and native dependency resolution. The final AppImage CLI also ran discover against the actual Steam roots and the explicit local UTRY folder: two libraries, one installable Steam game, four runner/reference pairs, zero warnings, and no xdelta3 candidate. It reads through the bundled runtime; no runner is executed by discovery. Final logs: discovery-packaging-0.2.1.log and discovery-packages-verified.log.
 
 Automatic startup discovery was visually confirmed in the real desktop window (logs/discovery-default-ui.png): main form remains usable and its result area reports two libraries, one native game and three Steam-only candidate references. The source screenshot contains no filesystem paths or private game media. Final UI source removes the old hard-coded Steam-folder guess so discovery can fill the canonical path when the Steam root itself is a symlink. External/manual paths are not overwritten by discovery.
+
+---
+
+## 2026-10-04 — v0.2.2 to v0.2.4 updates and Runner Matching Handoff
+
+### 1. Work completed (v0.2.2 — v0.2.4)
+- **Desktop Localization (v0.2.2)**:
+  - Added Russian (`ru.json`) and English (`en.json`) embedded resources in `src/Gmmt.Desktop/Localization/`.
+  - Added live language switcher dropdown (`ComboBox`) with immediate UI update without application restart.
+  - Added persistent language settings saved in `~/.config/gmmt/settings.json`.
+- **Steam Depots, Deltarune Donor, & UI Tabs (v0.2.3 — v0.2.4)**:
+  - Added Steam depot discovery in `SteamDiscovery.cs` scanning `steamapps/content` and `ubuntu12_32/steamapps/content/` for `app_391540/depot_391541/data.win`.
+  - Added 1-click depot download: directly executes `steam -console +download_depot 391540 391541`.
+  - Added 1-click Deltarune install: opens `steam steam://install/1671210` to fetch a free native GMS2 Linux runner.
+  - Automatically auto-populates `vanilla` with discovered `data.win` or `game.unx`.
+  - Reorganized `MainWindow.cs` into 3 separate tabs: `Сборка мода` (`tab.build`), `Steam и депоты` (`tab.steam`), and `Раннеры` (`tab.runners`).
+  - Added ToolTips across all UI elements (`ru.json` and `en.json`).
+  - Releases v0.2.2, v0.2.3, v0.2.4 built, verified with `scripts/verify-linux.py`, and committed to Git (`e581120`).
+
+---
+
+### 2. Root Cause Analysis: "No matching local Linux runner" for UNDERTALERY (GMS 2.0.6.0, BC16)
+
+#### Problem statement
+When attempting to build or verify Undertale Red & Yellow (`UNDERTALERY`), GMMT inspects the mod archive:
+- Engine: `GMS 2.0.6.0`
+- Bytecode: `BC16`
+- Flag: `IsGMS2 = true`
+
+GMMT outputs:
+```
+UNDERTALERY: GMS 2.0.6.0, BC16
+Runner: не найден
+No matching local Linux runner. Register a runner together with its known-compatible reference archive.
+```
+
+#### Why Undertale's runner was rejected
+Undertale in Steam (`~/.local/share/Steam/steamapps/common/Undertale/runner`) is GameMaker: Studio 1 (`1.0.0.1539`, `IsGMS2 = false`, BC16).
+In `RuntimeCatalog.Plan`:
+```csharp
+candArchive.Metadata.BytecodeVersion == archive.Metadata.BytecodeVersion &&
+candArchive.Metadata.IsGMS2 == archive.Metadata.IsGMS2
+```
+Because `IsGMS2` does not match, Undertale's GMS1 runner was rejected. This rejection is correct: GMS1 runners crash when executing GMS2 bytecode due to differences in array memory representations and VM opcodes.
+
+#### Why the mod's bundled runner was missed
+The downloaded archive `/home/andrew/Загрузки/utry-2.1.4-linux.zip` **already contains a native Linux GMS2 runner** (`GMGreen`, ELF 32-bit i386, 5,254,272 bytes).
+However, `SteamDiscovery.cs` had this check:
+```csharp
+var runnerEntry = zip.Entries.FirstOrDefault(e => e.Name.Equals("runner", StringComparison.OrdinalIgnoreCase) && e.Length > 50_000);
+var archiveEntry = zip.Entries.FirstOrDefault(e => (e.Name.EndsWith(".unx", StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(".win", StringComparison.OrdinalIgnoreCase)) && e.Length > 50_000);
+if (runnerEntry != null && archiveEntry != null)
+```
+`utry-2.1.4-linux.zip` contains `runner` and `patch.xdelta`, but NO `.unx` or `.win` file! Therefore `archiveEntry == null`, and `SteamDiscovery` completely ignored the zip!
+
+#### Why Cyrillic characters become '?' on copy
+In Linux X11, copying text via standard Avalonia `TextBox` text selection can negotiate `STRING` (ISO-8859-1) target atom instead of `UTF8_STRING` depending on the receiving application. Adding an explicit "Копировать лог" button using `Clipboard.SetTextAsync` sends UTF-8 directly.
+
+---
+
+### 3. Immediate Implementation Plan for Next Agent
+
+1. **Automatic Runner Cloud Cache / Bundling (CRITICAL)**:
+   - Provide pre-cached/downloadable standard GameMaker Linux runners (GMS 1.4 BC16, GMS 2.0 BC16, GMS 2.3+ BC17) hosted on GitHub Releases or embedded in GMMT data.
+   - On first launch or on missing runner, GMMT automatically downloads/provisions the needed runner into `~/.local/share/gmmt/runners/`.
+
+2. **Runner Discovery from ZIP without bundled .unx/.win**:
+   - In `SteamDiscovery.cs`: extract `runner` even if `archiveEntry == null`.
+   - Inspect runner binary for GM engine markers:
+     - `GMGreen` or `GameMaker Studio 2` => `IsGMS2 = true, BytecodeVersion = 16`.
+     - `GMRed` => `IsGMS2 = false, BytecodeVersion = 16`.
+   - Allow registering runner with synthetic profile or using the mod archive being built as the reference archive.
+
+3. **Direct .zip Mod Support**:
+   - In `ArchiveInput.cs`: allow user to select `*.zip` directly.
+   - Auto-extract patch (`*.xdelta`), vanilla base, bundled `runner`, and extra `assets/`.
+   - Use the bundled `runner` automatically for that build.
+
+4. **Automatic xdelta Base Fallback**:
+   - If patching fails with checksum mismatch (`XD3_INVALID_INPUT`), try alternate base (`game.unx` vs `data.win`).
+
+5. **Copy Log Button**:
+   - Add "Копировать лог" button calling `Clipboard.SetTextAsync` with UTF-8 text.
