@@ -14,6 +14,10 @@ The mod archive is copied byte for byte. GMMT does not rewrite GML or downgrade 
 
 - Avalonia desktop interface for packaging, compatibility planning and runner registration.
 - Automatic discovery of Steam libraries, native game folders and local runners, including libraries on other drives and Flatpak Steam.
+- Automatic discovery of clean Windows depots (`ubuntu12_32/steamapps/content/`) for xdelta patches.
+- Automatic scanning and caching of runners bundled in `.zip` archives.
+- Automated runner matching during build: finds and registers compatible runners without manual configuration.
+- 1-click Deltarune (GMS2) installation and Steam console depot download helper.
 - English and Russian UI, system-language detection and a persistent language selector.
 - CLI for experiments and automation.
 - `data.win` / `game.unx` input, or `.xdelta` with the exact clean **Windows archive** required by the patch.
@@ -107,29 +111,22 @@ CLI output, machine-readable manifest fields and low-level third-party/OS diagno
 
 ### 1. Find and register a Linux runner
 
-On opening, GMMT searches standard and Flatpak Steam locations and libraries listed in `libraryfolders.vdf`. Detected native games appear in the game-folder selector; **Linux ELF + archive** candidates appear in the **Runners** tab. Selecting a candidate fills its runner, reference archive and available Steam scout paths.
+On opening, GMMT searches standard and Flatpak Steam locations, libraries listed in `libraryfolders.vdf`, and `~/Downloads` / `~/Загрузки`. Detected native games appear in the game-folder selector; **Linux ELF + archive** candidates appear in the **Runners** tab.
 
-`~/Downloads` and `~/Загрузки` are also searched. For extracted Linux mods elsewhere, open **Additional search folders**, add folders and select **Search for runners again**. Search depth and directory counts are bounded; ZIP files are not extracted automatically.
-
-Discovery does not prove the pair works: an installed `game.unx` may already be modified. Confirm that the reference runs with the candidate, then select **Add runner**. Discovery does not automatically register profiles or change game files. Manually supplied files remain supported.
-
-A profile needs:
-
-1. A unique ID, for example `undertale-linux`.
-2. A native Linux ELF runner.
-3. A reference `game.unx` / `data.win` known to work with that runner.
-4. Optionally, a local Steam scout `steam-runtime/run.sh`.
-
-Registration records metadata and hashes. It does not execute or certify the runner. You supply the runner and reference; the application does not download game engines.
+- **Automated Runner Matching**: You do not have to manually register runners. When building a mod, GMMT matches its bytecode version against all discovered candidates and automatically registers and selects a suitable runner.
+- **Bundled ZIP Archives**: GMMT automatically inspects `.zip` archives in download directories (e.g. downloaded native Linux mods/ports), extracts bundled runners, and caches them in `~/.local/share/gmmt/runners/cache/`.
+- **Install Deltarune (GMS2)**: Need a GameMaker Studio 2 runner? The **Install Deltarune (GMS2)** button in the Runners tab triggers the free Linux install via Steam (`steam://install/1671210`) as an official GMS2 runner donor.
+- **Manual Registration**: To register a runner explicitly, select a candidate or enter its ELF path, reference archive, unique ID, and optional Steam runtime script, then click **Add runner**.
 
 ### 2. Prepare a mod
 
 In **Build mod**, choose a prepared archive or `.xdelta` patch.
 
-- For xdelta, open **Advanced settings and xdelta** and select the clean **Windows** `data.win` expected by that patch. A Linux archive from a similar game is not a substitute.
+- **Clean Windows Depots for xdelta**: Applying an xdelta patch requires the exact clean Windows `data.win` file. GMMT automatically discovers downloaded Steam depots in `ubuntu12_32/steamapps/content/` and auto-fills the field.
+- **Download Windows depot via Steam**: If you don't have the clean Windows files yet, click this button under Advanced Settings to open the Steam console (`steam://open/console`) with the exact `download_depot <appid> <depotid>` command copied to your clipboard.
 - Add external resource folders, one per line: original resources first, mod resources afterward. Later files replace earlier files at the same relative path.
 - Keep **Build in a separate folder** checked and choose a **new** output folder. **Save location…** selects a parent and proposes `gmmt-linux-package` inside it; you can edit the path.
-- Supply a runner ID or Linux library folders in advanced settings when necessary.
+- Supply an explicit runner ID or Linux library folders in advanced settings if needed.
 
 ### 3. Check and package
 
