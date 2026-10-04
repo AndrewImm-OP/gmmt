@@ -35,3 +35,6 @@ gmmt.tar.xz
 
 __pycache__/
 *.pyc
+
+# Distribution builds
+dist/

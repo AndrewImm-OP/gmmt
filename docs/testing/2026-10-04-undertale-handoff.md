@@ -215,3 +215,70 @@ A locally supplied reference is a user assertion, not a compatibility certificat
 Bwrap launches with entirely read-only / (including temporary/cache paths) survived but did not expose an X11 window in bounded searches. This harness is more restrictive than normal desktop startup; do not count those launches as successful UI verification. Ordinary timed launch without bwrap, with GMMT_CATALOG pointing to the local test catalog, produced exactly one GMMT window (33554447), title GMMT · Linux runner packages. Captured new-desktop-screen.png after verifying focus before/after. This verifies real initial UI rendering; file-picker/build workflow remains tested through shared services/CLI, not fully exercised via UI automation. Initial isolated desktop issue not yet reduced to a specific temporary/cache dependency.
 
 Final sequential solution build:826warnings0errors; final standalone tests PASS21. Archived CLI sequential build843warnings0errors. No game archive or runner binary is added to source control. Preserved legacy source check no missing files; only shared dependency relative path changed.
+
+## 2026-10-04 — Desktop refinement and Linux distribution packages (0.2.0)
+
+### Request and implementation
+
+The user requested a prettier interface and actual AppImage/deb/rpm/another distro-friendly format, then a detailed GitHub README and a short Telegram announcement. Existing native-runner packaging remains the main implementation; old/translation remains untouched.
+
+The Avalonia desktop retains its dark Fluent foundation with charcoal surfaces, mint primary action, consistent field spacing and a compact header. The main tab now presents the mod archive, resources and output first. xdelta baseline, optional libraries, runner override and native-extension acknowledgement are inside an expander. Runner registration and catalog path are in the runners tab. Result/status stay pinned while the form scrolls at smaller sizes. Busy state disables form actions and displays indeterminate progress; exceptions use an explicit error status. Analysis blockers now use an amber blocked status rather than a misleading green completion label. TextBox accessibility names use field labels. No engine/downconversion functionality was altered.
+
+Added packaging/gmmt.svg (original geometric monogram) and gmmt.desktop. scripts/build-linux.py performs Release self-contained linux-x64 publication of desktop and CLI, merges shared files, preserves dependency notices, creates all four formats and hashes the outputs. Source-controlled app screenshot: docs/images/desktop.png. README is now a detailed Russian user/developer guide; docs/packaging.md records technical packaging behavior and limits. dist/ is ignored; no game inputs or binaries were added to Git.
+
+### Environment and build commands
+
+Host: CachyOS (Arch family), x86_64. SDK: 10.0.111; published .NET runtime pack 10.0.11. Existing local tools: dpkg-deb, rpmbuild, zstd, appimagetool. appimagetool itself is an AppImage: APPIMAGE_EXTRACT_AND_RUN=1 avoids the host's unavailable FUSE mount. Packaging uses /tmp for staging and NUGET_HTTP_CACHE_PATH, because NuGet HTTP cache names contain a colon, unsupported by the checkout's exFAT filesystem. Ordinary NuGet package files remain under ignored experiments/2026-10-04/nuget-packages. First restore may require network. Do not run two publish processes against this checkout concurrently.
+
+Final build command from repository root:
+
+```sh
+DOTNET_CLI_HOME="$PWD/experiments/2026-10-04/dotnet-home" \
+  python scripts/build-linux.py --version 0.2.0
+python scripts/verify-linux.py --version 0.2.0
+```
+
+The appimagetool runtime download succeeded; its bundled mksquashfs is limited to two workers through --mksquashfs-opt. RPM construction disables host-specific automatic dependency scanning and post-install stripping of managed payloads. Dependencies are explicitly listed. No installation/root actions were performed. deb uses --root-owner-group. Linux package wrappers are /usr/bin/gmmt (GUI) and /usr/bin/gmmt-cli (CLI); both point to /opt/gmmt. AppImage/portable AppRun starts GUI by default and accepts --cli. xdelta3 remains a system dependency and is recommended by deb/rpm.
+
+Actual files in dist/:
+
+- GMMT-0.2.0-x86_64.AppImage
+- gmmt_0.2.0_amd64.deb
+- gmmt-0.2.0-1.x86_64.rpm
+- gmmt-0.2.0-linux-x86_64.tar.zst
+- SHA256SUMS
+- build-info.json
+
+Build-info truthfully records the previous source HEAD plus dirty=true: this batch was built before committing its source/UI changes. It does not claim a clean tagged release or bit-identical reproducibility. SHA256SUMS records actual packaged files; use it for exact identity rather than approximate sizes.
+
+### Validation results
+
+scripts/verify-linux.py passed for all four formats. It validates SHA256SUMS, exercises the AppImage extract-and-run CLI path, extracts all formats into separate temporary directories, compares every payload file by SHA256, verifies executable apphosts and installed launchers, validates desktop entries and runs each CLI with DOTNET_ROOT and DOTNET_ROOT_X64 pointing to a nonexistent directory. That confirms the included runtime is usable without the system SDK. ldd resolves apphost, SkiaSharp, HarfBuzzSharp and ImageMagick dependencies on this host. The first validation script mistakenly expected libAvaloniaNative.so, which is not the Linux backend; the corrected script checks the actual Linux native libraries. Optional .NET tracing library libcoreclrtraceptprovider.so can lack liblttng-ust on this host; normal CLI/GUI launch does not require that tracing feature.
+
+Final regression build restored with network permission and temporary HTTP cache:
+
+```sh
+DOTNET_CLI_HOME="$PWD/experiments/2026-10-04/dotnet-home" \
+NUGET_HTTP_CACHE_PATH=/tmp/gmmt-test-http-cache \
+DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+  dotnet build tests/Gmmt.Runtime.Tests/Gmmt.Runtime.Tests.csproj \
+  -m:1 -p:NuGetAudit=false --packages "$PWD/experiments/2026-10-04/nuget-packages"
+DOTNET_CLI_HOME="$PWD/experiments/2026-10-04/dotnet-home" \
+  dotnet run --project tests/Gmmt.Runtime.Tests --no-build --no-restore
+```
+
+Result: 819 existing dependency warnings, zero errors; PASS: 21 runtime selection and packaging checks. An earlier restricted-network restore failed; that failed attempt is not counted as a successful build.
+
+Visual inspection of the desktop at 980×860 and 700×640 shows preserved field alignment, scrolling at minimum size, and a pinned readable result area. Retained local images: logs/refined-desktop-wide.png and logs/refined-desktop-narrow.png. The source-controlled screenshot includes only GMMT with empty inputs, no private filesystem paths/game assets. The packaged AppImage also creates an actual native window titled GMMT · Моды для Linux in extract-and-run mode. GUI screenshots are only retained when the verified GMMT window is active; focus can move to the user's desktop while tools execute, so a skipped screenshot is not evidence of a crash. Mechanical skill detector ran once against the two edited Avalonia files and returned an empty finding array; actual screenshots remain the visual evidence.
+
+Logs under ignored experiments/2026-10-04/logs:
+
+- linux-packaging-0.2.0.log
+- linux-packages-verified.log
+- linux-final-tests-build.log
+
+### Remaining platform checks and release constraints
+
+This verifies the current CachyOS host and extracted package content, not package-manager dependency resolution or desktop behavior on every Debian/Ubuntu/Fedora version. Test real installation/uninstallation in clean VMs next. Docker is present as a client, but no usable server was detected in this session. All artifacts are x86_64/glibc; ARM, musl, Flatpak and Windows builds were not produced. deb/rpm are unsigned. AppImage still relies on standard OS GUI/native libraries; it does not bundle a whole distribution or game runner dependencies.
+
+No GitHub Release was created: the task requested builds and source/README updates, and local downloadable artifacts are concrete. Code/documentation may be pushed to the already authorized private AndrewImm-OP/gmmt repository. Never push dist/ or experiments/ through git. The user's desired Telegram description should accurately describe experimental native runner packaging and four application formats without claiming universal compatibility or full gameplay validation.

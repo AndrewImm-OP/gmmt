@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=GMMT
+Comment=Build Linux packages for GameMaker mods
+Comment[ru]=Сборка Linux-пакетов для модов GameMaker
+Exec=gmmt
+Icon=gmmt
+Terminal=false
+Categories=Utility;
+StartupNotify=true
