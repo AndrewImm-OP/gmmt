@@ -342,11 +342,38 @@ public sealed class MainWindow : Window
             catch { }
         }
     }
+    private static void RunSteamCommand(string arguments)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "steam",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+        }
+        catch
+        {
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "flatpak",
+                    Arguments = $"run com.valvesoftware.Steam {arguments}",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+            }
+            catch { }
+        }
+    }
     private async Task DownloadDepotPrompt()
     {
         var appId = (discoveredGames.SelectedItem is DiscoveredGame dg && dg.AppId != null) ? dg.AppId : "391540";
         var depotId = appId == "391540" ? "391541" : (appId + "1");
-        OpenSteamUri("steam://open/console");
+        RunSteamCommand($"-console +download_depot {appId} {depotId}");
         if (Clipboard != null)
         {
             try { await Clipboard.SetTextAsync($"download_depot {appId} {depotId}"); } catch { }

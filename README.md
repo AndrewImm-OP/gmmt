@@ -123,7 +123,7 @@ On opening, GMMT searches standard and Flatpak Steam locations, libraries listed
 In **Build mod**, choose a prepared archive or `.xdelta` patch.
 
 - **Clean Windows Depots for xdelta**: Applying an xdelta patch requires the exact clean Windows `data.win` file. GMMT automatically discovers downloaded Steam depots in `ubuntu12_32/steamapps/content/` and auto-fills the field.
-- **Download Windows depot via Steam**: If you don't have the clean Windows files yet, click this button under Advanced Settings to open the Steam console (`steam://open/console`) with the exact `download_depot <appid> <depotid>` command copied to your clipboard.
+- **Download Windows depot via Steam**: If you don't have the clean Windows files yet, clicking this button triggers `steam -console +download_depot <appid> <depotid>` to download the depot directly without manual console input.
 - Add external resource folders, one per line: original resources first, mod resources afterward. Later files replace earlier files at the same relative path.
 - Keep **Build in a separate folder** checked and choose a **new** output folder. **Save location…** selects a parent and proposes `gmmt-linux-package` inside it; you can edit the path.
 - Supply an explicit runner ID or Linux library folders in advanced settings if needed.

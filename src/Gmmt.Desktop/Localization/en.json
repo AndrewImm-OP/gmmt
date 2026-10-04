@@ -77,6 +77,6 @@
   "steam.complete": "\n\nMod installed: {0}\nBackup: {1}\nLaunch the native Linux game through Steam. Gameplay is not yet verified.",
   "steam.downloadDepot": "Download Windows depot via Steam",
   "steam.installDeltarune": "Install Deltarune (GMS2)",
-  "steam.depotInstructions": "Steam console opened. Run this command:\ndownload_depot {0} {1}\nOnce downloaded, click 'Search again' — GMMT will detect data.win automatically.",
+  "steam.depotInstructions": "Depot download started: steam -console +download_depot {0} {1}\nOnce downloaded in Steam, click 'Search again' — data.win will be detected automatically.",
   "steam.deltaruneStarted": "Started Deltarune installation in Steam (steam://install/1671210). Once installed, click 'Search runners again'."
 }
