@@ -14,6 +14,9 @@ public static class Program
                 inspect --archive DATA
                 register-runner --id NAME --runner ELF --reference DATA [--steam-runtime RUN.SH]
                 runners
+                discover [--steam-root DIR ...] [--runner-root DIR ...]
+                install --package PACKAGE_FOLDER --game-dir NATIVE_LINUX_GAME
+                restore --game-dir NATIVE_LINUX_GAME
                 plan --archive DATA [--runner-id NAME]
                 package --archive DATA --output NEW_FOLDER [--runner-id NAME] [--assets DIR ...] [--libraries DIR ...]
                 package --patch XDELTA --vanilla WINDOWS_DATA --output NEW_FOLDER [same options]
@@ -29,7 +32,7 @@ public static class Program
             var values = new Dictionary<string, List<string>>();
             var flags = new HashSet<string> { "--native-extensions-reviewed" };
             var allowed = new HashSet<string> { "--archive", "--id", "--runner", "--reference", "--steam-runtime", "--catalog",
-                "--runner-id", "--output", "--assets", "--libraries", "--patch", "--vanilla", "--native-extensions-reviewed" };
+                "--steam-root", "--runner-root", "--package", "--game-dir", "--runner-id", "--output", "--assets", "--libraries", "--patch", "--vanilla", "--native-extensions-reviewed" };
             for (int i = 1; i < args.Length; i++)
             {
                 var key = args[i];
@@ -47,6 +50,9 @@ public static class Program
             void Print(object result) => Console.WriteLine(JsonSerializer.Serialize(result, RuntimeCatalog.JsonOptions));
             switch (args[0])
             {
+                case "discover": Print(SteamDiscovery.Scan(Many("--steam-root").Length == 0 ? null : Many("--steam-root"), Many("--runner-root").Length == 0 ? null : Many("--runner-root"))); return 0;
+                case "install": Print(new { Backup = SteamInstaller.Install(Required("--package"), Required("--game-dir")), GameplayVerified = false }); return 0;
+                case "restore": SteamInstaller.Restore(Required("--game-dir")); Print(new { Restored = true }); return 0;
                 case "inspect": Print(ArchiveInspector.Inspect(Required("--archive"))); return 0;
                 case "runners": Print(catalog.Read()); return 0;
                 case "register-runner":

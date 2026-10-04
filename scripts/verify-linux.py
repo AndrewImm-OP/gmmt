@@ -19,7 +19,7 @@ def digest(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.2.0')
+    parser.add_argument('--version', default='0.2.1')
     parser.add_argument('--dist', type=Path, default=ROOT / 'dist')
     args = parser.parse_args()
     dist = args.dist.resolve()

@@ -11,7 +11,7 @@ parser.add_argument("case", type=Path)
 parser.add_argument("--seconds", type=int, default=45)
 parser.add_argument("--runner", type=Path, help="Read-only runner override for a controlled runtime comparison")
 parser.add_argument("--config-dir", type=Path, help="Separate private config directory for this comparison")
-parser.add_argument("--entrypoint", choices=["runner", "launch.sh"], default="runner")
+parser.add_argument("--entrypoint", choices=["runner", "launch.sh", "run.sh"], default="runner")
 parser.add_argument("--scout-libs", action="store_true")
 parser.add_argument("--scout-selected", action="store_true")
 args = parser.parse_args()
@@ -41,7 +41,7 @@ if args.scout_selected:
     selected = subprocess.check_output([str(runtime_script), "--print-steam-runtime-library-paths"], text=True).strip()
     libpaths += selected.split(":")
 command += ["--setenv", "LD_LIBRARY_PATH", ":".join(libpaths)]
-command += ["./runner"] if args.entrypoint == "runner" else ["/bin/sh", "./launch.sh"]
+command += ["./runner"] if args.entrypoint == "runner" else ["/bin/sh", "./" + args.entrypoint]
 result = {"case":str(case),"command":command,"seconds":args.seconds,"entrypoint":args.entrypoint,
           "runner_override":str(args.runner.resolve()) if args.runner else None,
           "save_overlay":str(config),"attempt":attempt,"log_prefix":str(logdir/logprefix),"start_unix":time.time()}

@@ -31,7 +31,7 @@ def copy_tree(source, destination):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='0.2.0')
+    parser.add_argument('--version', default='0.2.1')
     parser.add_argument('--output', type=Path, default=ROOT / 'dist')
     parser.add_argument('--appimagetool', default=os.environ.get('APPIMAGETOOL', 'appimagetool'))
     parser.add_argument('--runtime-file', type=Path, help='Offline AppImage runtime; otherwise appimagetool downloads it')

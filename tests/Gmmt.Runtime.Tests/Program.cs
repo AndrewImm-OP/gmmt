@@ -59,6 +59,91 @@ try
     using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "gmmt-package.json"))))
         Check(!manifest.RootElement.GetProperty("GameplayVerified").GetBoolean(), "Packaging asserted gameplay verified");
     Reject(() => PackageBuilder.Create(plan, output, [assets]), "Second package overwrote output");
+    if (OperatingSystem.IsLinux())
+    {
+    // Install/restore against a synthetic native Steam layout; never touch a real game.
+    var game = Path.Combine(root, "steam-game"); Directory.CreateDirectory(Path.Combine(game, "assets"));
+    File.WriteAllBytes(Path.Combine(game, "runner"), elf);
+    File.WriteAllText(Path.Combine(game, "assets/game.unx"), "original game");
+    File.WriteAllText(Path.Combine(game, "assets/original.ogg"), "original media");
+    File.WriteAllText(Path.Combine(game, "run.sh"), "original launcher");
+    File.WriteAllText(Path.Combine(game, "unrelated.txt"), "preserve me");
+    File.SetUnixFileMode(Path.Combine(game, "run.sh"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    SteamInstaller.Install(output, game);
+    Check(File.ReadAllText(Path.Combine(game, "assets/game.unx")) == "test archive bytes", "Steam archive not installed");
+    Check(File.ReadAllText(Path.Combine(game, "run.sh")).Contains("exec sh ./launch.sh"), "Steam launcher not redirected");
+    Check(File.Exists(Path.Combine(game, ".gmmt-original/assets/original.ogg")), "Original media not backed up");
+    Reject(() => SteamInstaller.Install(output, game), "Second install overwrote original backup");
+    File.AppendAllText(Path.Combine(game, "assets/game.unx"), "modified");
+    Reject(() => SteamInstaller.Restore(game), "Modified install silently discarded");
+    Check(File.Exists(Path.Combine(game, ".gmmt-original/runner")), "Blocked restore lost backup");
+    File.Copy(Path.Combine(output, "assets/game.unx"), Path.Combine(game, "assets/game.unx"), true);
+    SteamInstaller.Restore(game);
+    Check(File.ReadAllText(Path.Combine(game, "assets/game.unx")) == "original game", "Original data not restored");
+    Check(File.ReadAllText(Path.Combine(game, "run.sh")) == "original launcher" && (File.GetUnixFileMode(Path.Combine(game, "run.sh")) & UnixFileMode.UserExecute) != 0, "Launcher permissions not restored");
+    Check(!File.Exists(Path.Combine(game, "launch.sh")) && !Directory.Exists(Path.Combine(game, ".gmmt-original")), "Restore retained mod files or active backup");
+    Check(File.ReadAllText(Path.Combine(game, "unrelated.txt")) == "preserve me", "Unrelated file was changed");
+    Reject(() => SteamInstaller.Install(output, output), "Self-install accepted");
+    File.WriteAllText(Path.Combine(game, "runner"), "Windows PE");
+    Reject(() => SteamInstaller.Install(output, game), "Non-native game accepted");
+    File.WriteAllBytes(Path.Combine(game, "runner"), elf);
+    File.AppendAllText(Path.Combine(output, "runner"), "changed package");
+    Reject(() => SteamInstaller.Install(output, game), "Tampered package accepted");
+    Check(!Directory.Exists(Path.Combine(game, ".gmmt-original")), "Rejected package left an active backup");
+    File.WriteAllBytes(Path.Combine(output, "runner"), elf);
+    if (OperatingSystem.IsLinux())
+    {
+        File.CreateSymbolicLink(Path.Combine(game, "assets/link"), pe);
+        Reject(() => SteamInstaller.Install(output, game), "Linked game assets accepted");
+        File.Delete(Path.Combine(game, "assets/link"));
+    }
+    File.WriteAllText(Path.Combine(output, "assets/extra.ogg"), "not in manifest");
+    Reject(() => SteamInstaller.Install(output, game), "Unlisted package file accepted");
+    File.Delete(Path.Combine(output, "assets/extra.ogg"));
+    SteamInstaller.Install(output, game);
+    File.AppendAllText(Path.Combine(game, ".gmmt-original/assets/game.unx"), "bad backup");
+    Reject(() => SteamInstaller.Restore(game), "Tampered original backup accepted");
+    Check(File.ReadAllText(Path.Combine(game, "assets/game.unx")) == "test archive bytes", "Rejected restore partially changed installation");
+    File.WriteAllText(Path.Combine(game, ".gmmt-original/assets/game.unx"), "original game");
+    var journalPath = Path.Combine(game, ".gmmt-original/install.json");
+    File.WriteAllText(journalPath, File.ReadAllText(journalPath).Replace("Installed", "Restoring"));
+    File.Delete(Path.Combine(game, "runner"));
+    File.Move(Path.Combine(game, ".gmmt-original/runner"), Path.Combine(game, "runner"));
+    SteamInstaller.Restore(game);
+    Check(File.ReadAllText(Path.Combine(game, "assets/game.unx")) == "original game" && !Directory.Exists(Path.Combine(game, ".gmmt-original")), "Interrupted restoration did not resume");
+    using (var heldLock = new FileStream(Path.Combine(game, ".gmmt-operation.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        Reject(() => SteamInstaller.Install(output, game), "Concurrent game operation accepted");
+    File.Delete(Path.Combine(game, ".gmmt-operation.lock"));
+    }
+    if (OperatingSystem.IsLinux())
+    {
+        var discoveryElf = elf.Concat(System.Text.Encoding.ASCII.GetBytes("YoYo Games game.unx")).ToArray();
+        var steamRoot = Path.Combine(root, "fake-steam");
+        var extraLibrary = Path.Combine(root, "external library");
+        var nativeGame = Path.Combine(extraLibrary, "steamapps/common/DiscoveredGame");
+        Directory.CreateDirectory(Path.Combine(steamRoot, "steamapps"));
+        Directory.CreateDirectory(Path.Combine(nativeGame, "assets"));
+        File.WriteAllBytes(Path.Combine(nativeGame, "runner"), discoveryElf);
+        File.WriteAllBytes(Path.Combine(nativeGame, "xdelta3"), elf);
+        File.WriteAllText(Path.Combine(nativeGame, "assets/game.unx"), "discovery does not parse or run archives");
+        File.WriteAllText(Path.Combine(nativeGame, "run.sh"), "launcher");
+        var sharedObject = discoveryElf.ToArray(); sharedObject[16] = 3;
+        File.WriteAllBytes(Path.Combine(nativeGame, "shared-object"), sharedObject);
+        File.WriteAllText(Path.Combine(steamRoot, "steamapps/libraryfolders.vdf"), "\"libraryfolders\" { \"0\" { \"path\" \"" + extraLibrary + "\" } }");
+        var discovered = SteamDiscovery.Scan([steamRoot], []);
+        Check(discovered.Libraries.Contains(extraLibrary), "Additional Steam library missed");
+        Check(discovered.Games.Single().Directory == nativeGame, "Native Steam game not detected");
+        Check(discovered.Runners.Single().RunnerPath == Path.Combine(nativeGame, "runner"), "Runner missed or shared object falsely accepted");
+        var steamLink = Path.Combine(root, "steam-link"); Directory.CreateSymbolicLink(steamLink, steamRoot);
+        Check(SteamDiscovery.Scan([steamRoot, steamLink], []).Runners.Length == 1, "Steam root aliases duplicated candidates");
+        var donor = Path.Combine(root, "downloaded-mod"); Directory.CreateDirectory(donor);
+        File.WriteAllBytes(Path.Combine(donor, "runner"), discoveryElf); File.WriteAllText(Path.Combine(donor, "game.unx"), "data");
+        Check(SteamDiscovery.Scan([], [donor]).Runners.Single().RunnerPath == Path.Combine(donor, "runner"), "Extra runner directory missed");
+        File.WriteAllText(Path.Combine(steamRoot, "steamapps/libraryfolders.vdf"), "\"libraryfolders\" { \"1\" \"" + extraLibrary + "\" }");
+        Check(SteamDiscovery.Scan([steamRoot], []).Games.Length == 1, "Legacy library layout missed");
+        File.Delete(Path.Combine(nativeGame, "runner")); File.WriteAllBytes(Path.Combine(nativeGame, "runner"), [77, 90, 0, 0]);
+        Check(SteamDiscovery.Scan([steamRoot], []).Runners.Length == 0, "Windows executable detected as native runner");
+    }
     File.WriteAllText(data, "changed");
     var failedOutput = Path.Combine(root, "failed-package");
     Reject(() => PackageBuilder.Create(plan, failedOutput, [assets]), "Changed input accepted");

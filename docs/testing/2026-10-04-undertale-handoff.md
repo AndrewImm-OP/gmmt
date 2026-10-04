@@ -282,3 +282,78 @@ Logs under ignored experiments/2026-10-04/logs:
 This verifies the current CachyOS host and extracted package content, not package-manager dependency resolution or desktop behavior on every Debian/Ubuntu/Fedora version. Test real installation/uninstallation in clean VMs next. Docker is present as a client, but no usable server was detected in this session. All artifacts are x86_64/glibc; ARM, musl, Flatpak and Windows builds were not produced. deb/rpm are unsigned. AppImage still relies on standard OS GUI/native libraries; it does not bundle a whole distribution or game runner dependencies.
 
 No GitHub Release was created: the task requested builds and source/README updates, and local downloadable artifacts are concrete. Code/documentation may be pushed to the already authorized private AndrewImm-OP/gmmt repository. Never push dist/ or experiments/ through git. The user's desired Telegram description should accurately describe experimental native runner packaging and four application formats without claiming universal compatibility or full gameplay validation.
+
+## 2026-10-04 — Optional Steam replacement and restoration (0.2.1)
+
+### User-facing choice
+
+The user requested optional replacement of installed originals, with a checkbox for separate-directory mode. Added "Собирать в отдельную папку", checked by default. Checked mode keeps the previous standalone output behavior. Unchecked mode shows the native Linux game folder, explains closing the game/backups and exposes restoration. The primary button becomes "Установить мод в Steam". The UI suggests the locally present standard Undertale Steam folder but never installs until the user selects that mode and presses the action. Source-controlled screenshot refreshed to show the checkbox in its safe default state.
+
+Steam mode prepares a temporary package before modifying installed files. Original game assets and lib directories are automatically prepended to the selected resource/library overlays. This preserves original external resources unless the mod intentionally replaces the same relative paths. Restore invokes the shared service off the UI thread. CLI gained `install --package DIR --game-dir DIR` and `restore --game-dir DIR`.
+
+### Installer contract
+
+New `src/Gmmt.Runtime/SteamInstaller.cs` targets the observed native Linux layout: runner, assets/game.unx and run.sh. The actual installed Undertale run.sh was read and contains `LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH ./runner` preceded by chmod. No UNDERTALE named executable exists in this installation. Therefore the integration replaces run.sh with a forwarding script that uses `sh ./launch.sh` and forwards arguments. This exercises the package's chosen runtime/library selector rather than inheriting the original game's incompatible runner environment. Custom Steam launch options that bypass run.sh and Windows/Proton layouts are outside this contract.
+
+Managed entries: runner, assets, lib, run.sh, launch.sh and gmmt-package.json. Unrelated top-level files (including the installed root libsteam_api.so) are left alone. Existing managed entries are moved into `.gmmt-original` inside the game directory, preserving the pre-install state and Unix permissions. That state is not necessarily vanilla: this user's installed game already had prior modifications. Any existing `.gmmt-original` blocks another installation. A file lock prevents overlapping GMMT operations. User saves outside the game directory are not modified by this service.
+
+Preflight rejects non-Linux use, invalid game layouts, intersecting package/game paths, symlinks in managed input/backup paths, unavailable runner ELF, changed or unlisted package files and missing required manifest entries. Copied staging files are hashed again before moving the first original. Original and installed file/directory hashes are recorded in an installation journal. Installation exceptions attempt rollback; the Installing/Restoring journal supports resuming interrupted transitions through Restore. A process interruption is covered; this is not a guarantee of durability under filesystem corruption or power loss. Game/Steam updates are not coordinated by the GMMT lock: the UI instructs closing the game and restoring before integrity checks/updates.
+
+Ordinary restoration checks installed and original-backup hashes before changing anything. If the mod tree or backup changed, it refuses and preserves the backup rather than silently discarding changes. Restoration removes added managed entries and returns backed-up entries. Interrupted restoration recognizes originals already moved back and resumes. Do not remove the backup manually to get past a failure; inspect hashes and the journal instead.
+
+### Tests and evidence
+
+Final sequential solution build: 818 upstream warnings, zero errors. Final standalone tests: PASS 41 runtime selection and packaging checks (21 previous +20 install/restore checks). New cases cover archive/launcher replacement, backing up original media, duplicate-install refusal, refusing modified installations, backup retention on refusal, exact original data and executable permissions, removal of mod-only files, preservation of unrelated files, overlapping paths, non-native runners, tampered/unlisted packages, no backup left by preflight rejection, symlink rejection, tampered-backup refusal without partial writes, interrupted restoration and lock contention.
+
+Real integration used a fresh copy at `experiments/2026-10-04/runs/steam-install-copy`, copied from the real Steam Undertale directory. The already generated real Together package was installed through the new CLI. Its archive SHA256 matched the input package. Full source-tree hashes of the actual installed Steam game remained unchanged. The test harness was extended to accept `--entrypoint run.sh` and invoked the new forwarding launcher with a private ~/.config overlay:
+
+```sh
+dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll install \
+  --package experiments/2026-10-04/packages/together \
+  --game-dir experiments/2026-10-04/runs/steam-install-copy
+python scripts/testing/run_native_probe.py \
+  experiments/2026-10-04/runs/steam-install-copy --entrypoint run.sh --seconds 20
+dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll restore \
+  --game-dir experiments/2026-10-04/runs/steam-install-copy
+```
+
+Launch attempt 20261004T071429841225Z survived until intentional timeout (exit -15). This establishes execution through the new Steam-shaped run.sh path, not full gameplay or pressing Play in the Steam client. Restored copy matched EVERY pre-install file SHA256; the actual installed Steam folder also matched the saved source-tree snapshot. After adding stricter full-manifest/staged-copy verification, install/restore was repeated against the same restored copy and again matched every original file.
+
+Logs/metadata: logs/steam-copy-install.log, logs/steam-copy-launch.log, logs/steam-install-copy-20261004T071429841225Z-*.json/log, logs/steam-install-build-final.log, metadata/steam-copy-before.json. No original Steam files were replaced in this session.
+
+Desktop arrival was visually checked with the new checkbox checked (logs/steam-choice-ui.png). Further focus-sensitive snapshots may be skipped when the user's desktop takes focus; do not count a skipped unchecked-mode screenshot as visual evidence. The installation logic and restore are exercised through the shared service/CLI rather than a claimed complete native file-picker workflow.
+
+### Distribution update
+
+README and packaging guide describe 0.2.1 and the new mode, its native-Linux restriction, backup semantics and CLI. Build/verification scripts default to 0.2.1. Updated artifacts are generated under dist/0.2.1 to retain the preceding 0.2.0 builds. Rebuild and extraction verification commands:
+
+```sh
+python scripts/build-linux.py --version 0.2.1 --output dist/0.2.1
+python scripts/verify-linux.py --version 0.2.1 --dist dist/0.2.1
+```
+
+The installation feature itself was tested in a copied folder, not installed into the user's Steam game. Source code and documentation may be pushed to the already authorized private repository. Full Steam client Play-button validation and clean Debian/Fedora installation remain pending tests.
+
+## 2026-10-04 — Automatic discovery of Steam games and runner candidates (0.2.1)
+
+The user's next steering requested automatic game-folder and runner discovery. Added SteamDiscovery.Scan, automatic background scan on desktop opening, game and runner candidate ComboBoxes, repeat-search actions and optional additional runner search folders. Selection fills the game directory or donor runner/reference/runtime/ID fields. Candidate profiles are not silently registered: users confirm a known-working reference before Add runner. Existing catalog entries and manually filled paths remain intact; a finishing scan does not overwrite the busy build/install result.
+
+Discovery checks ~/.local/share/Steam, ~/.steam/steam, ~/.steam/root and Flatpak Steam's ~/.var/app/com.valvesoftware.Steam/.local/share/Steam. It resolves known Steam/library aliases to canonical directories, reads modern and legacy libraryfolders.vdf paths, deduplicates libraries/candidates and enumerates common game directories. Native installable games must have runner, assets/game.unx and run.sh plus a detected runner. SteamLinuxRuntime/Proton/Steamworks runtime folders are skipped rather than recursively crawling their OS trees.
+
+Runner scans are read-only, depth-limited (three levels, maximum 256 directory visits per game/search root, bounded files/children). They look for local archive filenames beside executables or under assets. No ZIP extraction, execution, download or archive metadata certification is performed. ELF headers/architecture are validated; ET_DYN must have PT_INTERP to avoid ordinary shared libraries. A bounded 64-MiB binary marker scan requires GameMaker/YoYo strings plus game.unx or instance_create, so a neighboring xdelta3 installer tool is not mistaken for a runner. Missing these markers means the user must provide the runner manually; this is discovery heuristics, not engine compatibility proof. Symlinked internal trees and active GMMT backup/staging directories are skipped. ~/Downloads and ~/Загрузки are searched by default; explicit additional folders replace those defaults for a scan.
+
+The real UTRY directory initially exposed an important discovery bug: both its actual ELF32 runner and adjacent ELF64 xdelta3 helper were considered candidates when only ELF format was checked. Binary inspection showed YoYo Games/GameMaker/game.unx markers in both measured game runners and none in xdelta3. The corrected scanner filters the helper, and the synthetic test fixture now contains valid ELF helpers without GameMaker markers as a regression case. Runtime library trees previously triggered scan-limit warnings; skipping runtime/tool directories removed that unrelated work.
+
+CLI: `gmmt-cli discover [--steam-root DIR ...] [--runner-root DIR ...]`. Output is JSON with libraries, native game folders, candidate runner/archive pairs and nonfatal warnings. The desktop combines Steam discovery with extra directories and provides manual file selection when no result matches.
+
+Validation: sequential solution build 818 upstream warnings, zero errors; PASS 48 checks. Seven additional discovery assertions cover an external library with spaces, native Steam game detection, correct runner versus helper/shared object, deduplication through Steam aliases, separately downloaded native mods, legacy VDF paths and Windows executable rejection. The prior 41 install/runtime checks still pass.
+
+Actual source scan found two Steam libraries and native Undertale. It reports separate candidate references for game.unx, game.unx.vanilla and gameog.unx: the first can already contain previous modifications, so none is automatically certified. Adding the local runs/official-linux directory finds the UTRY GameMaker runner while excluding its xdelta3 helper. Exact local output: metadata/discovered-steam-and-utry.json. These paths are not committed. README now explains discovery, extra roots, confirmation and limits. The app still does not change the installed Steam game until explicit install action.
+
+Updated 0.2.1 packages are rebuilt after the discovery fixes, not reused from the earlier checkbox-only build. Final package extraction/CLI checks must be rerun against dist/0.2.1 before reporting them to the user. Full Play-button validation, broad gameplay tests and Debian/Fedora VM installation remain outstanding platform evidence, not blockers for the implemented local discovery/installation features.
+
+### Final 0.2.1 verification
+
+The final four distribution artifacts passed scripts/verify-linux.py again: identical payload hashes across formats, autonomous CLI, executable launchers, desktop entries and native dependency resolution. The final AppImage CLI also ran discover against the actual Steam roots and the explicit local UTRY folder: two libraries, one installable Steam game, four runner/reference pairs, zero warnings, and no xdelta3 candidate. It reads through the bundled runtime; no runner is executed by discovery. Final logs: discovery-packaging-0.2.1.log and discovery-packages-verified.log.
+
+Automatic startup discovery was visually confirmed in the real desktop window (logs/discovery-default-ui.png): main form remains usable and its result area reports two libraries, one native game and three Steam-only candidate references. The source screenshot contains no filesystem paths or private game media. Final UI source removes the old hard-coded Steam-folder guess so discovery can fill the canonical path when the Steam root itself is a symlink. External/manual paths are not overwritten by discovery.
