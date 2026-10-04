@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Gmmt.Core</RootNamespace>
+    <AssemblyName>Gmmt.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      UndertaleModLib is not on NuGet. It is included as a git submodule.
+      Run setup.sh to clone and patch it.
+      If you have it elsewhere, adjust this path.
+    -->
+    <ProjectReference Include="..\..\..\..\extern\UndertaleModTool\UndertaleModLib\UndertaleModLib.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -161,3 +161,57 @@ Automatic review rejected first source push, stating that repository creation di
 
 ## Recommended next development step
 Implement a runtime compatibility/packaging plan as a distinct strategy: exact archive metadata, selected locally supplied runner, extension dependencies, external assets, source hashes, and evidence level. Keep GMS2-to-GMS1 lowering labeled experimental/unsupported until meaningful semantic translation tests pass. Do not automatically label a mod Windows-only based on one package, and do not select a mod solely because it lacks a Linux download: first establish its engine generation and dependency demands. A third case using GMS2 data without an existing ready native package is still required to test generality. Runner redistribution is not assumed authorized; consume a user-provided compatible runner in the initial design.
+
+# 2026-10-04 — implementation pivot requested by user
+
+User explicitly requested implementing native-runner selection/packaging, preserving the previous idea in `old` rather than discarding it. Earlier source/journal publication to the private gmmt repository was authorized.
+
+## Migration and preserved implementation
+Moved previous src tree to old/translation/src; copied original solution, build props and setup; moved historical auto-bisect.sh, bisect-unwrap.sh and fix.patch there. Added old/translation/README.md with restoration/build instructions. The historical setup is saved for reference; root setup manages shared dependencies. Retained common UndertaleModTool/Underanalyzer submodules and framework patches at repository root.
+
+Compared all66 tracked files from original src at pre-pivot HEAD63e0aa3 against old/translation/src: no missing files, only Gmmt.Core.csproj changed (relative reference becomes four levels up to root extern instead of two). Conversion, classifier, transplanter and desktop algorithms are preserved byte-for-byte. New active Core reuses only archive loader/metadata; new active CLI/Desktop depend on new Gmmt.Runtime, not the transplant pipeline.
+
+Initial archive build failed CS0012 (Underanalyzer reference) because moved obj/project.assets.json still pointed to original src paths. The first parallel restore silently stopped at Determining projects to restore under sandbox. Root cause was stale generated restore artifacts, not damaged archived source. Retried dotnet restore old/translation/src/Gmmt.Cli/Gmmt.Cli.csproj --force -m:1 with experiment-local NuGet packages; sequential build succeeded843warnings0errors. No changes to old conversion algorithms.
+
+## New architecture and behavior
+- RuntimeCatalog: local JSON profiles registered using user-supplied Linux ELF and known compatible reference archive. Records exact runner SHA256, ELF class/machine, full parsed engine version, bytecode and reference archive hash; optional locally installed scout script. Registration itself does not run or certify a runner. Duplicate IDs rejected.
+- ArchiveInspector: UndertaleModLib parsed metadata, archive SHA256 and native extension filenames. YYC rejected.
+- Planner: exact engine/bytecode match, reference checksum preference, explicit selection for ambiguity, host architecture check, runner hash/header revalidation. SameArchiveAsReference and MatchingMetadataOnly are evidence labels, neither means gameplay passed.
+- ArchiveInput: prepared archive or xdelta reconstruction from clean Windows archive using system xdelta3. ArgumentList avoids shell/quote interpolation; ordinary xdelta checksums remain enabled;120second timeout and temporary cleanup. Hashes original patch and baseline.
+- PackageBuilder: brand-new output only; stages sibling temporary dir and publishes by rename. Copies input data byte-for-byte to assets/game.unx, merges original/mod media in supplied order, copies runner and optional user libraries, verifies data/runner SHA256 and records per-file hashes. Source installations and saves untouched. Rejects symlink resource inputs and output inside input resource tree. Excludes installers/scripts/patch/main archive duplicates from resource merge. Native extensions require explicit manual dependency-review acknowledgement.
+- Launcher: relative package directory, local lib path, optional Steam scout selected host/runtime library order, GMMT_STEAM_RUNTIME relocation override. Copied executable permission attempted on Linux; falls back to system ELF loader if permission bits unavailable. Requires matching host multilib/system libraries; does not bundle scout/system libraries.
+- Manifest: input hashes, selected profile/metadata/evidence, skipped resources and output hashes. GameplayVerified=false; packaging alone cannot mark verified playability.
+- CLI: inspect, register-runner, runners, plan, package. Native package can originate directly from data.win or from Windows xdelta+vanilla. --catalog and GMMT_CATALOG override default user local application data/gmmt/runners.json. plan blocked exit2; input/package errors exit1.
+- Desktop: new Avalonia form with Packaging and Runners tabs, file/folder selectors, patch+Windows baseline input, resource overlays, library directories, output path, optional runner ID and dependency-review checkbox. Shares same runtime services. Long parse/copy operations off UI thread. No automatic engine download, distribution or game launch inside desktop.
+
+## Build and automated tests
+New CLI build succeeded. Avalonia dependencies restored and new Desktop build succeeded. New solution includes Core, Runtime, CLI, Desktop and standalone console tests; root setup updated to .NET10/sequential solution restore+build. Existing upstream nullable/Fody/NuGet audit-cache warnings remain; new solution build826warnings0errors at observed check.
+
+Standalone tests under tests/Gmmt.Runtime.Tests require no new test-framework NuGet dependency. First run failed because test expected InvalidDataException to inherit IOException; corrected the explicit rejection filter and aligned planner exception handling. Added full ELF minimum-header length validation. Passed21selection/packaging checks: PE rejection, exact reference preference, engine mismatch, YYC, absent ID, candidate-only evidence, ambiguity, mutated runner, missing scout script, existing output preservation, recursive output refusal, native extension acknowledgement, raw archive preservation, resources, installer exclusion, false gameplay certification, repeat output refusal, changed input cleanup and symlink input rejection. Tests run via sequential build then --no-build run to avoid previously observed parallel MSBuild sandbox issue.
+
+## Real-package integration inputs and commands
+Catalog: experiments/2026-10-04/metadata/runtime-catalog.json (ignored local artifact). Registered undertale-gms1 using native-baseline/runner + native-baseline/assets/game.unx; registered utry-gms2 using official-linux/runner + official-linux/assets/game.unx. Both use existing SteamLinuxRuntime/steam-runtime/run.sh. Runner bytes and references are earlier hashed inputs.
+
+Planner automatically selects undertale-gms1 for together-windows.win with MatchingMetadataOnly; utry-gms2 for utry-2.1.4-windows.win with SameArchiveAsReference. Both have zero detected native extension files. Explicit UTRY --runner-id undertale-gms1 returns2 with engine/bytecode mismatch blocker, without launching the crashing runner. Raw plan/register outputs: logs/new-register-gms1.log, new-register-gms2.log, new-plan-together.log, new-plan-utry.log, new-incompatible-plan.log.
+
+Together package was built using --patch together-package/Undertale Together/UndertaleTogether.xdelta --vanilla cached Windows1.08 --assets native-baseline/assets --assets Together/Optional Files --output packages/together.227hashed output files. UTRY package built with --archive runs/utry-2.1.4-windows.win --assets runs/official-linux/assets --output packages/utry.329hashed output files. Both package commands exited0 and launch.sh passed sh -n. Windows data hashes match earlier reconstructions; originals not rewritten. See logs/new-package-together.log and new-package-utry.log and local output manifests.
+
+## Generated-launcher smoke tests
+Native harness now supports --entrypoint launch.sh to test package launchers instead of bypassing them. Private config overlays still used.
+
+```sh
+python scripts/testing/run_native_probe.py experiments/2026-10-04/packages/together --entrypoint launch.sh --seconds 30
+python scripts/testing/run_native_probe.py experiments/2026-10-04/packages/utry --entrypoint launch.sh --seconds 45
+```
+
+Together attempt20261004T062328482252Z and UTRY attempt20261004T062517250532Z survived until intentional timeout (exit-15). Valid viewed screenshots new-package-together-screen.png (FFFFF transient startup text) and new-package-utry-screen.png (AAAAA transient startup text) prove rendered startup windows, NOT menu/gameplay for these newly generated packages. The identical archives/runners previously reached name entry and Flowey in other cases, but do not silently upgrade these startup smoke-test evidence levels. Full gameplay, sound/video, two-player movement and end-to-end desktop file-picker workflow remain unverified. To avoid retaining screenshots of unrelated active apps, pre/post-capture active title is checked and changed-focus captures discarded.
+
+New Desktop first launch under bwrap read-only root/private config reached35second timeout with no exception log; no screenshot taken because user was active in ChatGPT when capture checked. Second90second visual check was started separately; record result below. Actual desktop service operations are exercised through CLI/shared-service tests; do not claim completed manual UI workflow without evidence.
+
+## Remaining limitations
+A locally supplied reference is a user assertion, not a compatibility certificate. Exact metadata does not prove every engine build matches; external scripts and shaders can still be platform-specific. Asset and library directories are supplied explicitly rather than fully inferred. No shipped runner pool, automated download, runtime redistribution permission or universal GMS2-to-GMS1 lowering. Required next scope: test a GMS2 mod without ready native package, broaden gameplay validation, and add independently measured verified runner/archive associations if desired.
+
+### Desktop visual verification and final checks
+Bwrap launches with entirely read-only / (including temporary/cache paths) survived but did not expose an X11 window in bounded searches. This harness is more restrictive than normal desktop startup; do not count those launches as successful UI verification. Ordinary timed launch without bwrap, with GMMT_CATALOG pointing to the local test catalog, produced exactly one GMMT window (33554447), title GMMT · Linux runner packages. Captured new-desktop-screen.png after verifying focus before/after. This verifies real initial UI rendering; file-picker/build workflow remains tested through shared services/CLI, not fully exercised via UI automation. Initial isolated desktop issue not yet reduced to a specific temporary/cache dependency.
+
+Final sequential solution build:826warnings0errors; final standalone tests PASS21. Archived CLI sequential build843warnings0errors. No game archive or runner binary is added to source control. Preserved legacy source check no missing files; only shared dependency relative path changed.

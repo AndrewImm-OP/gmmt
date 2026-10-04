@@ -1,0 +1,14 @@
+--- src/Gmmt.Patch/CodeTransplanter.cs
++++ src/Gmmt.Patch/CodeTransplanter.cs
+@@ -449,6 +449,11 @@
+             VarID = targetData.Variables?.Count ?? 0,
+         };
+ 
+         targetData.Variables?.Add(newVar);
++        
++        if (targetData.Variables != null)
++        {
++            newVar.VarID = targetData.Variables.IndexOf(newVar);
++        }
+         return newVar;
+     }

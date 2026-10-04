@@ -22,8 +22,6 @@ apply_patch_once() {
 }
 apply_patch_once "$UTMT_DIR" patches/undertale-mod-tool-frameworks.patch
 apply_patch_once "$UTMT_DIR/Underanalyzer" patches/underanalyzer-frameworks.patch
-dotnet restore gmmt.sln -m:1
-dotnet build gmmt.sln -c Debug --no-restore -m:1
+dotnet restore src/Gmmt.Cli/Gmmt.Cli.csproj
+dotnet build src/Gmmt.Cli/Gmmt.Cli.csproj -c Debug --no-restore -m:1
 echo "CLI ready: dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll --help"
-
-echo "Desktop ready: dotnet src/Gmmt.Desktop/bin/Debug/net10.0/gmmt-desktop.dll"

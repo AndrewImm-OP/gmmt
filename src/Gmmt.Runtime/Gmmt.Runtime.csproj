@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><ProjectReference Include="../Gmmt.Core/Gmmt.Core.csproj" /></ItemGroup>
+</Project>
