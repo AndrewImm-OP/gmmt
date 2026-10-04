@@ -16,7 +16,7 @@ The mod archive is copied byte for byte. GMMT does not rewrite GML or downgrade 
 - Automatic discovery of Steam libraries, native game folders and local runners, including libraries on other drives and Flatpak Steam.
 - Automatic discovery of clean Windows depots (`ubuntu12_32/steamapps/content/`) for xdelta patches.
 - Automatic scanning and caching of runners bundled in `.zip` archives.
-- Automated runner matching during build: finds and registers compatible runners without manual configuration.
+- Automated runner matching during build: tries bundled/local candidates, then a checksum-pinned optional download.
 - 1-click Deltarune (GMS2) installation and Steam console depot download helper.
 - English and Russian UI, system-language detection and a persistent language selector.
 - CLI for experiments and automation.
@@ -32,7 +32,7 @@ The earlier diff/transplant and GMS2 → GMS1 experiment is preserved in [`old/t
 
 ## Downloads and requirements
 
-Download application packages from [GitHub Releases](https://github.com/AndrewImm-OP/gmmt/releases/latest). Version **0.2.3** targets **Linux x86_64 / amd64** and includes .NET; installing .NET separately is not required.
+Download application packages from [GitHub Releases](https://github.com/AndrewImm-OP/gmmt/releases/latest). Version **0.2.5** targets **Linux x86_64 / amd64** and includes .NET; installing .NET separately is not required.
 
 Standard OS libraries are still needed: glibc, libgcc/libstdc++, X11 or XWayland, OpenGL/Mesa, fontconfig/freetype, ICU, OpenSSL 3 and zlib. deb/rpm declare dependencies. AppImage and tar.zst rely on these libraries being present. These builds do not cover ARM or Alpine/musl.
 
@@ -40,26 +40,26 @@ Standard OS libraries are still needed: glibc, libgcc/libstdc++, X11 or XWayland
 
 | Format | Download | Use |
 | --- | --- | --- |
-| AppImage | [GMMT-0.2.3-x86_64.AppImage](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/GMMT-0.2.3-x86_64.AppImage) | Run without system installation |
-| deb | [gmmt_0.2.3_amd64.deb](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt_0.2.3_amd64.deb) | Debian/Ubuntu and compatible distributions |
-| rpm | [gmmt-0.2.3-1.x86_64.rpm](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt-0.2.3-1.x86_64.rpm) | Fedora and compatible RPM distributions |
-| tar.zst | [gmmt-0.2.3-linux-x86_64.tar.zst](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.3/gmmt-0.2.3-linux-x86_64.tar.zst) | Portable folder, including Arch/CachyOS |
+| AppImage | [GMMT-0.2.5-x86_64.AppImage](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.5/GMMT-0.2.5-x86_64.AppImage) | Run without system installation |
+| deb | [gmmt_0.2.5_amd64.deb](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.5/gmmt_0.2.5_amd64.deb) | Debian/Ubuntu and compatible distributions |
+| rpm | [gmmt-0.2.5-1.x86_64.rpm](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.5/gmmt-0.2.5-1.x86_64.rpm) | Fedora and compatible RPM distributions |
+| tar.zst | [gmmt-0.2.5-linux-x86_64.tar.zst](https://github.com/AndrewImm-OP/gmmt/releases/download/v0.2.5/gmmt-0.2.5-linux-x86_64.tar.zst) | Portable folder, including Arch/CachyOS |
 
 ### AppImage
 
 ```sh
-chmod +x GMMT-0.2.3-x86_64.AppImage
-./GMMT-0.2.3-x86_64.AppImage
+chmod +x GMMT-0.2.5-x86_64.AppImage
+./GMMT-0.2.5-x86_64.AppImage
 
 # CLI from the same file
-./GMMT-0.2.3-x86_64.AppImage --cli --help
+./GMMT-0.2.5-x86_64.AppImage --cli --help
 ```
 
 If FUSE is unavailable, use extract-and-run:
 
 ```sh
-./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run
-./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run --cli --help
+./GMMT-0.2.5-x86_64.AppImage --appimage-extract-and-run
+./GMMT-0.2.5-x86_64.AppImage --appimage-extract-and-run --cli --help
 ```
 
 See the [official AppImage FUSE documentation](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
@@ -67,7 +67,7 @@ See the [official AppImage FUSE documentation](https://docs.appimage.org/user-gu
 ### deb
 
 ```sh
-sudo apt install ./gmmt_0.2.3_amd64.deb
+sudo apt install ./gmmt_0.2.5_amd64.deb
 # Only needed for xdelta input:
 sudo apt install xdelta3
 
@@ -78,7 +78,7 @@ gmmt-cli --help
 ### rpm
 
 ```sh
-sudo dnf install ./gmmt-0.2.3-1.x86_64.rpm
+sudo dnf install ./gmmt-0.2.5-1.x86_64.rpm
 sudo dnf install xdelta3
 
 gmmt
@@ -90,7 +90,7 @@ Packages are currently unsigned. deb/rpm install the payload under `/opt/gmmt`, 
 ### Portable archive
 
 ```sh
-tar --zstd -xf gmmt-0.2.3-linux-x86_64.tar.zst
+tar --zstd -xf gmmt-0.2.5-linux-x86_64.tar.zst
 ./GMMT.AppDir/AppRun
 ./GMMT.AppDir/AppRun --cli --help
 ```
@@ -109,11 +109,11 @@ CLI output, machine-readable manifest fields and low-level third-party/OS diagno
 
 ## Desktop quick start
 
-### 1. Find and register a Linux runner
+### 1. Choose a mod; let GMMT find a runner
 
 On opening, GMMT searches standard and Flatpak Steam locations, libraries listed in `libraryfolders.vdf`, and `~/Downloads` / `~/Загрузки`. Detected native games appear in the game-folder selector; **Linux ELF + archive** candidates appear in the **Runners** tab.
 
-- **Automated Runner Matching**: You do not have to manually register runners. When building a mod, GMMT matches its bytecode version against all discovered candidates and automatically registers and selects a suitable runner.
+- **Automated Runner Matching**: You do not have to manually register runners. When building a mod, GMMT prefers registered profiles and discovered runner/reference pairs. It also tries a bundled runner or a runner-only ZIP candidate. These candidates remain explicitly unverified; the target mod is never saved as a known-compatible reference.
 - **Bundled ZIP Archives**: GMMT automatically inspects `.zip` archives in download directories (e.g. downloaded native Linux mods/ports), extracts bundled runners, and caches them in `~/.local/share/gmmt/runners/cache/`.
 - **Install Deltarune (GMS2)**: Need a GameMaker Studio 2 runner? The **Install Deltarune (GMS2)** button in the Runners tab triggers the free Linux install via Steam (`steam://install/1671210`) as an official GMS2 runner donor.
 - **Manual Registration**: To register a runner explicitly, select a candidate or enter its ELF path, reference archive, unique ID, and optional Steam runtime script, then click **Add runner**.
@@ -122,7 +122,7 @@ On opening, GMMT searches standard and Flatpak Steam locations, libraries listed
 
 In **Build mod**, choose a prepared archive or `.xdelta` patch.
 
-- **Clean Windows Depots for xdelta**: Applying an xdelta patch requires the exact clean Windows `data.win` file. GMMT automatically discovers downloaded Steam depots in `ubuntu12_32/steamapps/content/` and auto-fills the field.
+- **Clean Windows Depots for xdelta**: Applying an xdelta patch requires the exact clean base archive specified by the patch. This may be Windows `data.win` or Linux `game.unx`. GMMT automatically discovers downloaded Steam depots in `ubuntu12_32/steamapps/content/` and auto-fills the field.
 - **Download Windows depot via Steam**: If you don't have the clean Windows files yet, clicking this button triggers `steam -console +download_depot <appid> <depotid>` to download the depot directly without manual console input.
 - Add external resource folders, one per line: original resources first, mod resources afterward. Later files replace earlier files at the same relative path.
 - Keep **Build in a separate folder** checked and choose a **new** output folder. **Save location…** selects a parent and proposes `gmmt-linux-package` inside it; you can edit the path.
@@ -178,13 +178,30 @@ Profiles contain the runner ID, path, SHA256, ELF architecture, reference engine
 4. Requires an explicit ID when candidates are ambiguous.
 5. Checks the selected runner's existence, hash and architecture, plus the optional Steam runtime path.
 
-`SameArchiveAsReference` means an exact reference checksum match. `MatchingMetadataOnly` means an inferred match. Neither represents an automatic gameplay test.
+`UnverifiedRunnerCandidate` means a runner was selected without a known-compatible reference. It is an experimental launch candidate, not certified compatibility. `SameArchiveAsReference` means an exact reference checksum match. `MatchingMetadataOnly` means an inferred match. Neither represents an automatic gameplay test.
 
 The default catalog is in the user's local data directory, normally `~/.local/share/gmmt/runners.json`. Change it in the desktop, with `--catalog FILE`, or through `GMMT_CATALOG`. Catalog paths are local: register runners again or correct paths on another machine. Catalogs are excluded from source and application builds.
 
+
+### ZIP input and optional runner download
+
+Choose a ZIP directly in the desktop, or run:
+
+```sh
+gmmt-cli package --archive /path/to/mod.zip --vanilla /path/to/clean/base --output /path/to/new/package
+```
+
+A ZIP may contain one `.win`/`.unx` archive or one `.xdelta` patch, plus a Linux `runner` and `assets/`. GMMT overlays the ZIP assets after selected original resource folders. Multiple possible mod inputs are rejected with a request to extract and select the intended file. ZIP traversal, symlinks and oversized extraction are rejected. Install scripts and bundled patch executables are never executed.
+
+When the desktop resource field is empty, the selected discovered game's `assets` folder supplies original resources. A bundled runner, registered catalog or local discovered candidate is tried first. If none matches, GMMT downloads the optional `gmmt-runners.zip` asset from release v0.2.4 into `~/.local/share/gmmt/runners/builtin-0245afb8bc62/`. Its SHA256 is pinned in source; a different bundle is rejected. A cached verified bundle works offline. The application packages do not embed game runners. To populate/check the cache explicitly, use `gmmt-cli fetch-runners`.
+
+The current download contains only two x86 BC16 candidates with manifest engine versions `1.0.0.1539` and `2.0.6.0`. Downloaded candidates require matching manifest metadata. A local `GMRed`/`GMGreen` marker identifies a family hint only; it does not establish a precise engine or bytecode version. Marker-only candidates are restricted to historical BC16 input. GMS2.3+/BC17 runners are not supplied or guessed.
+
+For xdelta, GMMT tries the supplied base, discovered desktop depots/native game archives, and standard Undertale Steam locations. A base is accepted only when xdelta completes with its checksum checks enabled. If no base works, the error remains actionable; GMMT does not disable validation. The successful base hash is recorded. The **Copy log** button uses the clipboard text API for Cyrillic logs.
+
 ## CLI
 
-With deb/rpm, use `gmmt-cli`. For AppImage, use `./GMMT-0.2.3-x86_64.AppImage --cli`; for tar.zst, use `./GMMT.AppDir/AppRun --cli`. Examples use installed deb/rpm commands.
+With deb/rpm, use `gmmt-cli`. For AppImage, use `./GMMT-0.2.5-x86_64.AppImage --cli`; for tar.zst, use `./GMMT.AppDir/AppRun --cli`. Examples use installed deb/rpm commands.
 
 ```sh
 # Read-only discovery
@@ -307,11 +324,11 @@ dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll --help
 Install Python 3.11+, `dpkg-deb`, `rpmbuild`, `tar`, `zstd` and [appimagetool](https://github.com/AppImage/appimagetool) in addition to the SDK. The script publishes self-contained desktop/CLI applications for `linux-x64` and builds all four formats without root.
 
 ```sh
-python3 scripts/build-linux.py --version 0.2.3
+python3 scripts/build-linux.py --version 0.2.5
 
 # Custom appimagetool or an existing runtime for offline AppImage packaging:
 python3 scripts/build-linux.py \
-  --version 0.2.3 \
+  --version 0.2.5 \
   --appimagetool /path/to/appimagetool \
   --runtime-file /path/to/runtime-x86_64 \
   --output ./dist
@@ -324,7 +341,7 @@ Initial publication needs NuGet access and, without `--runtime-file`, an AppImag
 ```sh
 dotnet build tests/Gmmt.Runtime.Tests/Gmmt.Runtime.Tests.csproj -m:1
 dotnet run --project tests/Gmmt.Runtime.Tests --no-build
-python3 scripts/verify-linux.py --version 0.2.3
+python3 scripts/verify-linux.py --version 0.2.5
 ```
 
 Tests cover selection/mismatches, ambiguity, file mutations, extension acknowledgement, archive preservation, atomic failures, symlinks, reversible installation, backup integrity, interrupted restoration, discovery and localization/settings. Real game tests use isolated local copies and separate save overlays.

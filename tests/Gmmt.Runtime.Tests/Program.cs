@@ -192,6 +192,54 @@ try
     try { blockedLocalization.SetPreference("en"); throw new Exception("Settings overwrite directory unexpectedly succeeded"); }
     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Check(blockedLocalization.Preference == "system", "Failed write changed active preference"); }
     Check(!Directory.EnumerateFiles(root, "*.tmp", SearchOption.AllDirectories).Any(), "Failed settings write leaked a temporary file");
+    // ZIP extraction and candidate provenance are exercised with synthetic inputs only.
+    void Zip(string path, params (string Name, byte[] Bytes)[] entries)
+    {
+        using var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var (name, bytes) in entries) { using var stream = archive.CreateEntry(name).Open(); stream.Write(bytes); }
+    }
+    var green = Path.Combine(root, "green-runner");
+    var greenBytes = new byte[60000]; elf.CopyTo(greenBytes, 0); "GMGreen"u8.CopyTo(greenBytes.AsSpan(65530 % 60000));
+    File.WriteAllBytes(green, greenBytes);
+    Check(RunnerElfInspector.DetectFamily(green) == true && RunnerElfInspector.DetectFamily(runner) == null, "ELF family hint detection failed");
+    var crossChunk = Path.Combine(root, "cross-chunk"); var crossBytes = new byte[70000]; elf.CopyTo(crossBytes, 0); "GMGreen"u8.CopyTo(crossBytes.AsSpan(65533)); File.WriteAllBytes(crossChunk, crossBytes);
+    Check(RunnerElfInspector.DetectFamily(crossChunk) == true, "Family marker at chunk boundary was missed");
+    var modZip = Path.Combine(root, "mod.zip");
+    var archiveBytes = Enumerable.Repeat((byte)65, 60000).ToArray();
+    Zip(modZip, ("runner", greenBytes), ("assets/game.unx", archiveBytes), ("assets/music.ogg", "music"u8.ToArray()));
+    string extractedPath;
+    using (var prepared = await ArchiveInput.PrepareAsync(modZip))
+    {
+        extractedPath = prepared.Path;
+        Check(File.ReadAllBytes(prepared.Path).SequenceEqual(archiveBytes) && prepared.BundledRunnerPath != null, "ZIP mod/runner missing");
+        Check(File.ReadAllText(Path.Combine(prepared.ExtraAssetPaths.Single(), "music.ogg")) == "music", "ZIP assets missing");
+        var gms2 = inspection with { Metadata = metadata with { Major = 2, Minor = 0, Release = 6, Build = 0, IsGMS2 = true } };
+        var candidateCatalog = new RuntimeCatalog(Path.Combine(root, "candidate-catalog.json"), _ => gms2);
+        var candidatePlan = await RunnerResolver.PlanAsync(candidateCatalog, gms2, prepared, allowDownload: false);
+        Check(candidatePlan.CanPackage && candidatePlan.Evidence == "UnverifiedRunnerCandidate" && candidatePlan.Runner?.ReferenceArchiveSha256 == "", "Unverified bundled candidate falsely certified");
+        Check(candidateCatalog.Read().Count == 0, "Target mod falsely persisted as compatible runner reference");
+        Check(!(await RunnerResolver.PlanAsync(candidateCatalog, inspection, prepared, allowDownload: false)).CanPackage, "GMS2 hint selected for GMS1");
+        Check(!(await RunnerResolver.PlanAsync(candidateCatalog, gms2 with { Metadata = gms2.Metadata with { BytecodeVersion = 17 } }, prepared, allowDownload: false)).CanPackage, "Unknown runner bytecode guessed as BC17");
+    }
+    Check(!File.Exists(extractedPath), "ZIP temporary extraction leaked");
+    var malicious = Path.Combine(root, "malicious.zip"); Zip(malicious, ("assets/../../outside.txt", "escape"u8.ToArray()), ("data.win", archiveBytes));
+    try { using var ignored = await ArchiveInput.PrepareAsync(malicious); throw new Exception("ZIP traversal accepted"); }
+    catch (InvalidDataException) { Check(!File.Exists(Path.Combine(root, "outside.txt")), "ZIP escaped its extraction directory"); }
+    var ambiguous = Path.Combine(root, "ambiguous.zip"); Zip(ambiguous, ("a.win", archiveBytes), ("b.win", archiveBytes));
+    try { using var ignored = await ArchiveInput.PrepareAsync(ambiguous); throw new Exception("Ambiguous ZIP accepted"); } catch (InvalidDataException) { Check(true, "Ambiguous ZIP rejected"); }
+    var patchOnly = Path.Combine(root, "patch-only.zip"); Zip(patchOnly, ("runner", greenBytes), ("patch.xdelta", "patch"u8.ToArray()));
+    var discoveredZip = SteamDiscovery.Scan(Array.Empty<string>(), new[] { root });
+    Check(discoveredZip.Runners.Any(r => r.Game == "patch-only" && r.ArchivePath == null && r.IsGMS2 == true), "Patch-only ZIP runner was not discovered");
+    var wrongBundle = Path.Combine(root, "wrong-bundle.zip"); File.WriteAllText(wrongBundle, "untrusted");
+    Reject(() => CloudRunnerProvider.ReadBundle(wrongBundle, Path.Combine(root, "cloud")), "Runner bundle checksum was not checked");
+    // A wrong explicit xdelta base must fall through to a checksum-valid alternate.
+    var patchBase = Path.Combine(root, "patch-base"); var patchTarget = Path.Combine(root, "patch-target"); var patchFile = Path.Combine(root, "test.xdelta");
+    File.WriteAllText(patchBase, new string('A', 4096)); File.WriteAllText(patchTarget, new string('A', 4000) + new string('B', 96));
+    var encode = new System.Diagnostics.ProcessStartInfo("xdelta3") { UseShellExecute = false };
+    foreach (var arg in new[] { "-e", "-s", patchBase, patchTarget, patchFile }) encode.ArgumentList.Add(arg);
+    using (var proc = System.Diagnostics.Process.Start(encode)!) { await proc.WaitForExitAsync(); if (proc.ExitCode != 0) throw new Exception("Fixture patch encode failed"); }
+    using (var prepared = await ArchiveInput.PrepareAsync(patchFile, data, alternateBaselines: new[] { patchBase }))
+        Check(RuntimeCatalog.Hash(prepared.Path) == RuntimeCatalog.Hash(patchTarget) && prepared.InputHashes.ContainsKey(patchBase) && !prepared.InputHashes.ContainsKey(data), "xdelta fallback used/recorded wrong base");
     Console.WriteLine($"PASS: {passed} runtime, packaging, discovery and localization checks");
 }
 finally { Directory.Delete(root, true); }

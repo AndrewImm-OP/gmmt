@@ -14,11 +14,12 @@ public static class Program
                 inspect --archive DATA
                 register-runner --id NAME --runner ELF --reference DATA [--steam-runtime RUN.SH]
                 runners
+                fetch-runners (download/check the pinned optional runner cache)
                 discover [--steam-root DIR ...] [--runner-root DIR ...]
                 install --package PACKAGE_FOLDER --game-dir NATIVE_LINUX_GAME
                 restore --game-dir NATIVE_LINUX_GAME
                 plan --archive DATA [--runner-id NAME]
-                package --archive DATA --output NEW_FOLDER [--runner-id NAME] [--assets DIR ...] [--libraries DIR ...]
+                package --archive DATA_OR_ZIP [--vanilla BASE] --output NEW_FOLDER [--runner-id NAME] [--assets DIR ...] [--libraries DIR ...]
                 package --patch XDELTA --vanilla WINDOWS_DATA --output NEW_FOLDER [same options]
                 All commands accept --catalog FILE (default: local application data/gmmt/runners.json).
                 package: --native-extensions-reviewed acknowledges manually supplied native dependencies.
@@ -50,6 +51,7 @@ public static class Program
             void Print(object result) => Console.WriteLine(JsonSerializer.Serialize(result, RuntimeCatalog.JsonOptions));
             switch (args[0])
             {
+                case "fetch-runners": Print(await CloudRunnerProvider.EnsureRunnersAsync()); return 0;
                 case "discover": Print(SteamDiscovery.Scan(Many("--steam-root").Length == 0 ? null : Many("--steam-root"), Many("--runner-root").Length == 0 ? null : Many("--runner-root"))); return 0;
                 case "install": Print(new { Backup = SteamInstaller.Install(Required("--package"), Required("--game-dir")), GameplayVerified = false }); return 0;
                 case "restore": SteamInstaller.Restore(Required("--game-dir")); Print(new { Restored = true }); return 0;
@@ -65,11 +67,11 @@ public static class Program
                     var patch = One("--patch");
                     if ((archive == null) == (patch == null)) throw new ArgumentException("Supply either --archive or --patch with --vanilla.");
                     var output = Required("--output");
-                    using (var prepared = await ArchiveInput.PrepareAsync(archive ?? patch!, patch == null ? null : Required("--vanilla"), patch != null))
+                    using (var prepared = await ArchiveInput.PrepareAsync(archive ?? patch!, One("--vanilla"), patch != null))
                     {
-                        var packagePlan = catalog.Plan(ArchiveInspector.Inspect(prepared.Path), One("--runner-id"));
+                        var packagePlan = await RunnerResolver.PlanAsync(catalog, ArchiveInspector.Inspect(prepared.Path), prepared, One("--runner-id"), SteamDiscovery.Scan().Runners);
                         if (!packagePlan.CanPackage) { Print(packagePlan); return 2; }
-                        Print(new { Output = PackageBuilder.Create(packagePlan, output, Many("--assets"), Many("--libraries"),
+                        Print(new { Output = PackageBuilder.Create(packagePlan, output, Many("--assets").Concat(prepared.ExtraAssetPaths).ToArray(), Many("--libraries"),
                             values.ContainsKey("--native-extensions-reviewed"), prepared.InputHashes), Evidence = packagePlan.Evidence, GameplayVerified = false });
                         return 0;
                     }

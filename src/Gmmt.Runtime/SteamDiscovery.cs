@@ -4,9 +4,9 @@ using System.IO.Compression;
 
 namespace Gmmt.Runtime;
 
-public sealed record DiscoveredRunner(string Game, string RunnerPath, string ArchivePath, ElfInfo Elf, string? SteamRuntimeScript)
+public sealed record DiscoveredRunner(string Game, string RunnerPath, string? ArchivePath, ElfInfo Elf, string? SteamRuntimeScript, byte? BytecodeVersion = null, bool? IsGMS2 = null, string? EngineVersion = null)
 {
-    public override string ToString() => $"{Game} · ELF{Elf.Bits} · {Path.GetFileName(ArchivePath)}";
+    public override string ToString() => $"{Game} · ELF{Elf.Bits} · {(ArchivePath == null ? "runner only" : Path.GetFileName(ArchivePath))}";
 }
 public sealed record DiscoveredGame(string Name, string Directory, string? AppId = null)
 {
@@ -14,7 +14,7 @@ public sealed record DiscoveredGame(string Name, string Directory, string? AppId
 }
 public sealed record DiscoveredDepot(string AppId, string DepotId, string ArchivePath)
 {
-    public override string ToString() => $"App {AppId} · Depot {DepotId} · {Path.GetFileName(ArchivePath)}";
+    public override string ToString() => $"App {AppId} · Depot {DepotId} · {(ArchivePath == null ? "runner only" : Path.GetFileName(ArchivePath))}";
 }
 public sealed record SteamDiscoveryResult(string[] Libraries, DiscoveredGame[] Games, DiscoveredRunner[] Runners, string[] Warnings, DiscoveredDepot[] Depots);
 
@@ -107,7 +107,7 @@ public static class SteamDiscovery
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { warnings.Add(common + ": " + ex.Message); }
         }
-        var extra = runnerRoots ?? new[] { Path.Combine(home, "Downloads"), Path.Combine(home, "Загрузки") };
+        var extra = (runnerRoots ?? new[] { Path.Combine(home, "Downloads"), Path.Combine(home, "Загрузки") }).ToArray();
         foreach (var directory in extra)
         {
             cancellation.ThrowIfCancellationRequested();
@@ -136,28 +136,17 @@ public static class SteamDiscovery
                         using var zip = ZipFile.OpenRead(zipPath);
                         var runnerEntry = zip.Entries.FirstOrDefault(e => e.Name.Equals("runner", StringComparison.OrdinalIgnoreCase) && e.Length > 50_000);
                         var archiveEntry = zip.Entries.FirstOrDefault(e => (e.Name.EndsWith(".unx", StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(".win", StringComparison.OrdinalIgnoreCase)) && e.Length > 50_000);
-                        if (runnerEntry != null && archiveEntry != null)
+                        if (runnerEntry != null)
                         {
-                            var cacheDir = Path.Combine(zipRunnerCache, Path.GetFileNameWithoutExtension(zipPath));
+                            ZipInput.Validate(zip);
+                            var cacheDir = Path.Combine(zipRunnerCache, RuntimeCatalog.Hash(zipPath));
                             Directory.CreateDirectory(cacheDir);
-                            var cachedRunner = Path.Combine(cacheDir, runnerEntry.Name);
-                            var cachedArchive = Path.Combine(cacheDir, archiveEntry.Name);
-                            if (!File.Exists(cachedRunner) || new FileInfo(cachedRunner).Length != runnerEntry.Length)
-                            {
-                                runnerEntry.ExtractToFile(cachedRunner, true);
-                                if (OperatingSystem.IsLinux())
-                                {
-                                    File.SetUnixFileMode(cachedRunner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-                                }
-                            }
-                            if (!File.Exists(cachedArchive) || new FileInfo(cachedArchive).Length != archiveEntry.Length)
-                            {
-                                archiveEntry.ExtractToFile(cachedArchive, true);
-                            }
-                            if (visited.Add(cacheDir))
-                            {
-                                runners.AddRange(FindPairs(cacheDir, Path.GetFileNameWithoutExtension(zipPath), runtime, cancellation, warnings));
-                            }
+                            var cachedRunner = ZipInput.Extract(runnerEntry, cacheDir);
+                            var elf = RuntimeCatalog.InspectElf(cachedRunner);
+                            var cachedArchive = archiveEntry == null ? null : ZipInput.Extract(archiveEntry, cacheDir);
+                            var family = RunnerElfInspector.DetectFamily(cachedRunner);
+                            if (cachedArchive != null || family != null)
+                                runners.Add(new(Path.GetFileNameWithoutExtension(zipPath), cachedRunner, cachedArchive, elf, runtime, null, family));
                         }
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { }

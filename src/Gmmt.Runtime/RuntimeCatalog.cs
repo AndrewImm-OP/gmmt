@@ -172,6 +172,33 @@ public sealed class RuntimeCatalog
             }
         }
 
+        bool inferredRunner = false;
+        if (matches.Count == 0 && blockers.Count == 0 && runnerId == null && fallbackCandidates != null)
+        {
+            foreach (var candidate in fallbackCandidates.Where(c => c.ArchivePath == null))
+            {
+                // Markers only identify a family. Only attempt the historical BC16 VM family;
+                // newer bytecode requires real reference data or an explicit manifest entry.
+                bool historicalVm = archive.Metadata.BytecodeVersion == 16 &&
+                    (archive.Metadata.Major == 1 || (archive.Metadata.Major == 2 && archive.Metadata.Minor < 3));
+                if ((candidate.EngineVersion != null && candidate.EngineVersion != archive.Metadata.VersionString) ||
+                    candidate.IsGMS2 != archive.Metadata.IsGMS2 ||
+                    (candidate.BytecodeVersion.HasValue ? candidate.BytecodeVersion != archive.Metadata.BytecodeVersion : !historicalVm)) continue;
+                try
+                {
+                    var elf = InspectElf(candidate.RunnerPath);
+                    var hash = Hash(candidate.RunnerPath);
+                    matches.Add(new RunnerProfile("candidate-" + hash[..12], candidate.RunnerPath, hash, elf,
+                        archive.Metadata.VersionString, archive.Metadata.BytecodeVersion, "", candidate.SteamRuntimeScript));
+                    inferredRunner = true;
+                    warnings.Add("Runner selected as an unverified VM candidate. No known-compatible reference archive is available; launch and gameplay testing are required.");
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                { warnings.Add("Runner candidate unavailable: " + ex.Message); }
+            }
+        }
+
         RunnerProfile? selected = matches.Count == 1 ? matches[0] : null;
         if (matches.Count == 0 && blockers.Count == 0) blockers.Add("No matching local Linux runner. Register a runner together with its known-compatible reference archive.");
         if (matches.Count > 1) blockers.Add("Multiple matching runners. Select one explicitly with --runner-id.");
@@ -201,7 +228,7 @@ public sealed class RuntimeCatalog
         if (archive.NativeExtensions.Length > 0)
             warnings.Add("Native extensions require manual Linux dependency review: " + string.Join(", ", archive.NativeExtensions));
         warnings.Add("Metadata matching is a candidate selection, not a whole-game compatibility guarantee.");
-        var evidence = selected == null ? "NoRunner" : selected.ReferenceArchiveSha256 == archive.Sha256
+        var evidence = selected == null ? "NoRunner" : inferredRunner ? "UnverifiedRunnerCandidate" : selected.ReferenceArchiveSha256 == archive.Sha256
             ? "SameArchiveAsReference" : "MatchingMetadataOnly";
         return new(archive, selected, evidence, blockers.ToArray(), warnings.ToArray());
     }

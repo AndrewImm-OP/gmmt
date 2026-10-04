@@ -31,7 +31,7 @@
 
 ## Системные требования
 
-Готовые пакеты версии **0.2.3** собраны для **Linux x86_64 / amd64** и включают .NET. Устанавливать .NET отдельно для их запуска не требуется.
+Готовые пакеты версии **0.2.5** собраны для **Linux x86_64 / amd64** и включают .NET. Устанавливать .NET отдельно для их запуска не требуется.
 
 Нужны обычные системные библиотеки: glibc, libgcc/libstdc++, X11 или XWayland, OpenGL/Mesa, fontconfig/freetype, ICU, OpenSSL 3 и zlib. deb/rpm объявляют зависимости; для AppImage и переносимого архива они должны присутствовать в системе. Alpine/musl и ARM этими сборками не покрываются.
 
@@ -45,26 +45,26 @@
 
 | Формат | Файл | Применение |
 | --- | --- | --- |
-| AppImage | `GMMT-0.2.3-x86_64.AppImage` | Запуск без системной установки |
-| deb | `gmmt_0.2.3_amd64.deb` | Debian/Ubuntu и совместимые дистрибутивы |
-| rpm | `gmmt-0.2.3-1.x86_64.rpm` | Fedora и совместимые RPM-дистрибутивы |
-| tar.zst | `gmmt-0.2.3-linux-x86_64.tar.zst` | Переносимая папка, в том числе для Arch/CachyOS |
+| AppImage | `GMMT-0.2.5-x86_64.AppImage` | Запуск без системной установки |
+| deb | `gmmt_0.2.5_amd64.deb` | Debian/Ubuntu и совместимые дистрибутивы |
+| rpm | `gmmt-0.2.5-1.x86_64.rpm` | Fedora и совместимые RPM-дистрибутивы |
+| tar.zst | `gmmt-0.2.5-linux-x86_64.tar.zst` | Переносимая папка, в том числе для Arch/CachyOS |
 
 ### AppImage
 
 ```sh
-chmod +x GMMT-0.2.3-x86_64.AppImage
-./GMMT-0.2.3-x86_64.AppImage
+chmod +x GMMT-0.2.5-x86_64.AppImage
+./GMMT-0.2.5-x86_64.AppImage
 
 # CLI из того же файла
-./GMMT-0.2.3-x86_64.AppImage --cli --help
+./GMMT-0.2.5-x86_64.AppImage --cli --help
 ```
 
 Если система не предоставляет FUSE, используйте режим извлечения и запуска:
 
 ```sh
-./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run
-./GMMT-0.2.3-x86_64.AppImage --appimage-extract-and-run --cli --help
+./GMMT-0.2.5-x86_64.AppImage --appimage-extract-and-run
+./GMMT-0.2.5-x86_64.AppImage --appimage-extract-and-run --cli --help
 ```
 
 Подробнее: [официальная документация AppImage о FUSE](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
@@ -72,7 +72,7 @@ chmod +x GMMT-0.2.3-x86_64.AppImage
 ### deb
 
 ```sh
-sudo apt install ./gmmt_0.2.3_amd64.deb
+sudo apt install ./gmmt_0.2.5_amd64.deb
 # Только если нужны xdelta-патчи:
 sudo apt install xdelta3
 
@@ -83,7 +83,7 @@ gmmt-cli --help
 ### rpm
 
 ```sh
-sudo dnf install ./gmmt-0.2.3-1.x86_64.rpm
+sudo dnf install ./gmmt-0.2.5-1.x86_64.rpm
 sudo dnf install xdelta3
 
 gmmt
@@ -95,7 +95,7 @@ gmmt-cli --help
 ### Переносимый архив
 
 ```sh
-tar --zstd -xf gmmt-0.2.3-linux-x86_64.tar.zst
+tar --zstd -xf gmmt-0.2.5-linux-x86_64.tar.zst
 ./GMMT.AppDir/AppRun
 ./GMMT.AppDir/AppRun --cli --help
 ```
@@ -189,7 +189,7 @@ gmmt-cli restore --game-dir "/path/to/Steam/steamapps/common/Undertale"
 
 ## CLI
 
-После установки deb/rpm используйте `gmmt-cli`. Для AppImage — `./GMMT-0.2.3-x86_64.AppImage --cli`, для tar.zst — `./GMMT.AppDir/AppRun --cli`. В примерах ниже показан вариант deb/rpm.
+После установки deb/rpm используйте `gmmt-cli`. Для AppImage — `./GMMT-0.2.5-x86_64.AppImage --cli`, для tar.zst — `./GMMT.AppDir/AppRun --cli`. В примерах ниже показан вариант deb/rpm.
 
 ```sh
 # Найти игры и кандидаты в раннеры, ничего не записывая
@@ -264,7 +264,7 @@ Windows-установщики, скрипты, патчи и лишние ос�
 | --- | --- | --- |
 | Undertale Together, Windows-архив + оригинальный Linux-runner GMS1 | Сборка и запуск через сгенерированный launcher | Прохождение всех кооперативных сцен |
 | Undertale Red & Yellow, архив из Windows-патча + Linux-runner официального порта GMS2 | Сборка и запуск; отдельно проверены старт/ввод на официальном контроле | Универсальную поддержку GMS2-модов без Linux-порта |
-| Пакеты GMMT 0.2.3 | Проверка файлов и автономного CLI; запуск интерфейса на CachyOS | Установку и работу на всех Debian/Fedora-подобных системах |
+| Пакеты GMMT 0.2.5 | Проверка файлов и автономного CLI; запуск интерфейса на CachyOS | Установку и работу на всех Debian/Fedora-подобных системах |
 
 У UTRY существует Linux-порт; у Together доступны инструкции для Linux. Эти случаи полезны как контрольные примеры, но не заменяют тест отдельного Windows-мода без готового порта.
 
@@ -314,11 +314,11 @@ dotnet src/Gmmt.Cli/bin/Debug/net10.0/gmmt.dll --help
 Помимо SDK нужны Python 3.11+, `dpkg-deb`, `rpmbuild`, `tar`, `zstd` и [appimagetool](https://github.com/AppImage/appimagetool). Скрипт выполняет self-contained publish интерфейса и CLI для `linux-x64`, затем собирает все четыре формата без root.
 
 ```sh
-python3 scripts/build-linux.py --version 0.2.3
+python3 scripts/build-linux.py --version 0.2.5
 
 # Собственный путь к инструменту или AppImage runtime для офлайн-упаковки:
 python3 scripts/build-linux.py \
-  --version 0.2.3 \
+  --version 0.2.5 \
   --appimagetool /path/to/appimagetool \
   --runtime-file /path/to/runtime-x86_64 \
   --output ./dist
@@ -366,3 +366,13 @@ docs/testing/          Подробный журнал и передача пр�
 Отдельная лицензия исходников GMMT пока не выбрана. UndertaleModTool использует GPLv3, Underanalyzer — MPL 2.0; остальные зависимости сохраняют свои лицензии. Пакеты содержат тексты доступных сторонних лицензий в `licenses/` и `THIRD-PARTY-NOTICES.txt`.
 
 Игры, моды, сохранения и раннеры не входят в репозиторий и сборки приложения. Регистрация локального раннера не предоставляет права распространять игровые или модифицированные файлы.
+
+## Автоматизация в 0.2.5
+
+Можно выбрать ZIP мода прямо в приложении: GMMT извлекает единственный архив игры или xdelta-патч, Linux-раннер и папку assets. Ресурсы ZIP накладываются последними. Если поле ресурсов пусто, приложение использует assets выбранной найденной игры. Неоднозначные ZIP требуют выбора файла; пути вне каталога распаковки и симлинки отклоняются.
+
+Сначала используются локальные профили, раннер из ZIP и найденные кандидаты. Если подходящего раннера нет, GMMT скачивает кэш из gmmt-runners.zip релиза v0.2.4 с закреплённым SHA256. Проверенный кэш работает без сети; раннеры не встроены в пакеты приложения. Сейчас доступны только два x86 BC16 кандидата — версии 1.0.0.1539 и 2.0.6.0; GMS2.3+/BC17 не предоставляются. CLI: `gmmt-cli fetch-runners`.
+
+Раннер без эталонного архива отмечается как UnverifiedRunnerCandidate. Мод не выдаётся за доказанный рабочий эталон и не регистрируется автоматически в этом качестве. Маркер GMGreen/GMRed определяет только семейство.
+
+Для xdelta приложение пробует указанную базу и найденные запасные архивы. Проверки контрольных сумм не отключаются; сохраняется хэш успешной базы. Кнопка «Копировать лог» передаёт текст через API буфера обмена.

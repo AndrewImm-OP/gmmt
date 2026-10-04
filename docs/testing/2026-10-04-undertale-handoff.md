@@ -440,3 +440,28 @@ In Linux X11, copying text via standard Avalonia `TextBox` text selection can ne
 
 5. **Copy Log Button**:
    - Add "Копировать лог" button calling `Clipboard.SetTextAsync` with UTF-8 text.
+
+
+## 2026-10-04 — Autonomous ZIP/runner workflow (0.2.5)
+
+The user clarified that the earlier handoff is advisory and that autonomy/convenience are the objective. Another agent had stopped with uncommitted ArchiveInput, CloudRunnerProvider and RunnerElfInspector files, an ignored runner ZIP, and an already published gmmt-runners.zip asset in v0.2.4. Those files did not compile together: the provider called a DiscoveredRunner constructor that did not exist. It also invented precise engine/BC values from marker strings and suggested recording the target mod as the compatibility reference. These assumptions were replaced before use. Previously published v0.2.2–v0.2.4 application releases were verified as existing; they were not recreated.
+
+### Implementation and evidence semantics
+
+ArchiveInput accepts a ZIP with one archive or patch, extracts its Linux runner and assets, cleans its temporary files and retains input/base hashes. Ambiguous mod inputs are rejected. ZipInput centralizes bounded extraction, traversal/symlink rejection and destination checks. SteamDiscovery can cache a runner from a patch-only ZIP; cache directories are keyed by whole-ZIP SHA256, avoiding same-name/same-size collisions. Discovery does not execute runners. The existing source paths are preserved.
+
+RunnerElfInspector returns a nullable engine-family hint with overlapping bounded reads; it no longer invents an engine version or bytecode revision. RuntimeCatalog may produce an ephemeral UnverifiedRunnerCandidate for a historical BC16 family hint or a matching pinned manifest. ReferenceArchiveSha256 is empty, the target archive is not used as a fake reference, and this ephemeral profile is not persisted. GameplayVerified remains false. Older discovered runner/reference auto-registration behavior is retained. Registered profiles and real reference candidates take precedence.
+
+RunnerResolver is shared by desktop and CLI packaging. It tries registered/local/bundled candidates, then an optional downloaded cache. CloudRunnerProvider downloads the existing v0.2.4 asset with pinned SHA256 0245afb8bc62ff4d9689ef872f3f1416323ef45449315e12cc24ddfd2e4fa519, bounded network size/timeout, a temporary file and atomic replacement; every cache read checks the ZIP checksum. Only manifest-listed runners are extracted and ELF/family/bits checked. Download candidates require exact manifest engine and BC metadata. No binary ZIP is embedded in application packages or committed to source. The existing published ZIP is not re-uploaded by this change. It contains two x86/BC16 entries: GMS1 1.0.0.1539 and GMS2 2.0.6.0. Do not describe it as supporting all BC14–16 or all GMS2 revisions. No GMS2.3+/BC17 bundle is supplied.
+
+ArchiveInput's xdelta fallback keeps checksum verification enabled, tries explicit/discovered/standard base candidates, verifies that the successful base did not change during decoding and records that base's hash. Native fallback is opportunistic: Windows/Linux bases are not interchangeable unless the patch actually validates. UI resource fields can remain empty when the selected discovered game's assets are available; mod ZIP assets overlay last. Advanced base controls are collapsed to keep the build action visible. Copy log calls Clipboard.SetTextAsync; headless UI checks validate language changes and existing state preservation, not cross-application clipboard negotiation.
+
+### Validation performed
+
+Sequential solution build completed with zero errors. Runtime suite: PASS 77 checks, including marker chunk boundary, missing marker, direct ZIP bytes/runner/assets, extraction cleanup, traversal, ambiguous inputs, runner-only patch ZIP discovery, target reference not persisted, wrong-family/BC17 rejection, pinned bundle checksum rejection and wrong explicit xdelta base falling through to a valid alternate. Desktop headless suite: PASS 8 interactions; English/Russian wide/minimum renders are under logs/autonomy-ui. Public screenshots are updated from these inspected renders.
+
+The real /home/andrew/Загрузки/utry-2.1.4-linux.zip was packaged with an empty catalog, explicit isolated native baseline and original assets into runs/autonomy-zip-package. Output evidence: UnverifiedRunnerCandidate. Its launch.sh ran inside the existing bwrap harness with an isolated config/save overlay for 15 seconds, survived until deliberate termination (exit -15), and logged active texture processing. This validates initial startup only; it is the Linux UTRY control and does not prove universal Windows-only mod portability or complete gameplay. The installed Steam game and user saves were not changed.
+
+CLI fetch-runners successfully downloaded/read the pinned published bundle and returned both manifest candidates. Logs: autonomy-zip-package.log, autonomy-zip-launch.log, autonomy-cloud-runners.json, /tmp/gmmt-autonomy-final-build.log. The package has its own detailed gmmt-package.json. Application distribution verification and publication results are appended after the final build.
+
+Next work: a Windows-only mod without an existing Linux port, longer gameplay/input/save/extension coverage, a real Steam Play-button test, clean Debian/Fedora installation tests, and acquiring valid GMS2.3+/BC17 donor/reference evidence. The family hints do not replace that evidence.

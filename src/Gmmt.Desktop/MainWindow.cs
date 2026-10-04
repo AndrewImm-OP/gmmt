@@ -74,8 +74,6 @@ public sealed class MainWindow : Window
         var vanillaField = Field("vanilla.label", vanilla, tooltipKey: "tooltip.vanilla");
         var depotSearchBtn = Action("steam.depotSearch", Discover, tooltipKey: "tooltip.depotSearch");
         depotSearchBtn.Margin = new Thickness(0, 0, 0, 8);
-        build.Children.Add(vanillaField);
-        build.Children.Add(depotSearchBtn);
         build.Children.Add(Field("assets.label", assets, folder: true, tooltipKey: "tooltip.assets"));
         build.Children.Add(separate);
         Bind(() => ToolTip.SetTip(separate, T("tooltip.separate")));
@@ -83,6 +81,8 @@ public sealed class MainWindow : Window
         build.Children.Add(packageOutput);
 
         var advanced = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 8) };
+        advanced.Children.Add(vanillaField);
+        advanced.Children.Add(depotSearchBtn);
         advanced.Children.Add(Field("libraries.label", libraries, folder: true, tooltipKey: "tooltip.libraries"));
         advanced.Children.Add(Field("runner.label", runnerId, noBrowse: true, tooltipKey: "tooltip.runner"));
         reviewed.Content = Label("extensions.review");
@@ -143,7 +143,7 @@ public sealed class MainWindow : Window
         discoveredRunners.SelectionChanged += (_, _) =>
         {
             if (discoveredRunners.SelectedItem is not DiscoveredRunner found) return;
-            donorRunner.Text = found.RunnerPath; reference.Text = found.ArchivePath; runtime.Text = found.SteamRuntimeScript ?? "";
+            donorRunner.Text = found.RunnerPath; reference.Text = found.ArchivePath ?? ""; runtime.Text = found.SteamRuntimeScript ?? "";
             var slug = System.Text.RegularExpressions.Regex.Replace(found.Game.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
             donorId.Text = (slug.Length == 0 ? "runner" : slug) + "-linux";
         };
@@ -176,7 +176,17 @@ public sealed class MainWindow : Window
         Grid.SetColumn(language, 2); header.Children.Add(language);
         var result = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*"), Margin = new Thickness(0, 16, 0, 0) };
         status.Margin = new Thickness(0, 0, 0, 8);
-        result.Children.Add(status);
+        var statusRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        statusRow.Children.Add(status);
+        var copyLog = new Button { MinHeight = 28, Padding = new Thickness(10, 3) };
+        Bind(() => copyLog.Content = T("log.copy"));
+        copyLog.Click += async (_, _) =>
+        {
+            try { if (Clipboard != null) await Clipboard.SetTextAsync(log.Text ?? ""); }
+            catch (Exception ex) { SetLog(() => F("error.detail", ex.Message)); }
+        };
+        Grid.SetColumn(copyLog, 1); statusRow.Children.Add(copyLog);
+        result.Children.Add(statusRow);
         Grid.SetRow(progress, 1); result.Children.Add(progress);
         Grid.SetRow(log, 2); result.Children.Add(log);
         var page = new Grid { RowDefinitions = new RowDefinitions("Auto,*,190"), Margin = new Thickness(28, 22, 28, 24) };
@@ -446,11 +456,16 @@ public sealed class MainWindow : Window
                 vanilla.Text = baseline;
             }
         }
+        if (resourcePaths.Length == 0 && Directory.Exists(Path.Combine(game, "assets")))
+            resourcePaths = new[] { Path.Combine(game, "assets") };
         var fallbackRunners = lastDiscovery?.Runners;
+        var alternateBaselines = (lastDiscovery?.Depots.Select(d => d.ArchivePath) ?? Enumerable.Empty<string>())
+            .Concat(lastDiscovery?.Games.Select(g => Path.Combine(g.Directory, "assets/game.unx")) ?? Enumerable.Empty<string>()).ToArray();
         var result = await Task.Run(async () =>
         {
-            using var prepared = await ArchiveInput.PrepareAsync(mod, baseline, mod.EndsWith(".xdelta", StringComparison.OrdinalIgnoreCase));
-            var plan = database.Plan(ArchiveInspector.Inspect(prepared.Path), id.Length == 0 ? null : id, fallbackRunners);
+            using var prepared = await ArchiveInput.PrepareAsync(mod, baseline, mod.EndsWith(".xdelta", StringComparison.OrdinalIgnoreCase), alternateBaselines);
+            var plan = await RunnerResolver.PlanAsync(database, ArchiveInspector.Inspect(prepared.Path), prepared, id.Length == 0 ? null : id, fallbackRunners);
+            resourcePaths = resourcePaths.Concat(prepared.ExtraAssetPaths).ToArray();
             string? built = null, backup = null;
             if (create)
             {
@@ -481,7 +496,7 @@ public sealed class MainWindow : Window
         });
         SetLog(() => F("build.summary", result.Plan.Archive.Metadata.GameName, result.Plan.Archive.Metadata.VersionString,
                 result.Plan.Archive.Metadata.BytecodeVersion, result.Plan.Runner?.Id ?? T("runner.missing"))
-            + T(result.Plan.Evidence == "SameArchiveAsReference" ? "evidence.exact" : "evidence.metadata")
+            + T(result.Plan.Evidence == "SameArchiveAsReference" ? "evidence.exact" : result.Plan.Evidence == "UnverifiedRunnerCandidate" ? "evidence.candidate" : "evidence.metadata")
             + string.Join("\n", result.Plan.Blockers.Concat(result.Plan.Warnings))
             + (result.Built == null ? "" : F("build.complete", result.Built))
             + (result.Backup == null ? "" : F("steam.complete", game, result.Backup)));

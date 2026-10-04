@@ -19,3 +19,5 @@ Add translations to both catalogs, then bind controls through MainWindow's Label
 ## Validation
 
 The runtime console test project links the actual LocalizationService source and embeds the same catalogs. Tests cover locale detection/fallback, explicit overrides, saved settings, system re-detection, malformed settings, failed writes without state loss, catalog completeness and placeholder parity. Run the normal solution build and tests, then inspect real English/Russian desktop windows and a live switch with an isolated GMMT_SETTINGS file. Check both wide and minimum-size layouts.
+
+The Copy log button uses Clipboard.SetTextAsync. ZIP input, candidate evidence and clipboard captions are translated in both catalogs. Low-level runner/patch diagnostics remain English.
