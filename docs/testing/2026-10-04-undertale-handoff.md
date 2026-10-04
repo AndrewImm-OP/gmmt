@@ -465,3 +465,19 @@ The real /home/andrew/Загрузки/utry-2.1.4-linux.zip was packaged with an
 CLI fetch-runners successfully downloaded/read the pinned published bundle and returned both manifest candidates. Logs: autonomy-zip-package.log, autonomy-zip-launch.log, autonomy-cloud-runners.json, /tmp/gmmt-autonomy-final-build.log. The package has its own detailed gmmt-package.json. Application distribution verification and publication results are appended after the final build.
 
 Next work: a Windows-only mod without an existing Linux port, longer gameplay/input/save/extension coverage, a real Steam Play-button test, clean Debian/Fedora installation tests, and acquiring valid GMS2.3+/BC17 donor/reference evidence. The family hints do not replace that evidence.
+
+
+### Final 0.2.5 distribution verification
+
+`python scripts/build-linux.py --version 0.2.5 --output dist/0.2.5` completed. `python scripts/verify-linux.py --version 0.2.5 --dist dist/0.2.5` passed all four smoke tests: identical extracted payload hashes, standalone CLI, executable launchers, menu entries and resolved native dependencies on this host. No system package was installed. Verification was initially started before the builder produced SHA256SUMS, so that premature invocation failed with a missing-file error; it was rerun successfully after builder completion. Logs: /tmp/gmmt-build-0.2.5.log and /tmp/gmmt-verify-0.2.5.log.
+
+Artifacts: GMMT-0.2.5-x86_64.AppImage, gmmt_0.2.5_amd64.deb, gmmt-0.2.5-1.x86_64.rpm, gmmt-0.2.5-linux-x86_64.tar.zst, SHA256SUMS and build-info.json. Build provenance names source commit b70774e47ab9c04950dcf67720eaa02c8eae5693, SDK 10.0.111, RID linux-x64, self-contained true. The dirty flag is true because the dependency submodule still has the previously recorded framework patches; they were deliberately preserved.
+
+Source commit b70774e was pushed to master using the existing authenticated GitHub CLI credential helper. The first plain git push stalled; the duplicate was stopped after the credential-helper push succeeded. Release publication had one pre-creation GitHub TLS handshake timeout and was retried; publication verification is recorded below after the upload completes.
+
+
+### GitHub publication completed
+
+Published https://github.com/AndrewImm-OP/gmmt/releases/tag/v0.2.5 targeting b70774e47ab9c04950dcf67720eaa02c8eae5693. The final API read confirms published (not draft) and exactly six uploaded assets: all four application formats, SHA256SUMS and build-info.json. Each GitHub asset digest was compared against the actual local file SHA256 and matched.
+
+The TLS failures were diagnosed as the configured local HTTP proxy timing out during HTTPS handshakes. A direct API request succeeded. The failed create attempt did not leave a release visible by tag, ID or release list, so publication was repeated using per-process NO_PROXY for api.github.com and uploads.github.com. Global proxy settings were not changed. No duplicate release or additional runner upload was created. The successful release URL was returned by gh and independently reread for asset/digest verification.
